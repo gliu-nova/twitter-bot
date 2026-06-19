@@ -120,8 +120,11 @@ def check_api_health() -> dict[str, str]:
 
     try:
         r = requests.get(COINGECKO_BASE, params={"ids": "bitcoin", "vs_currencies": "usd"}, timeout=15)
-        r.raise_for_status()
-        results["coingecko"] = "ok"
+        if r.status_code == 429:
+            results["coingecko"] = "rate_limited (crypto uses 24h cache — ok)"
+        else:
+            r.raise_for_status()
+            results["coingecko"] = "ok"
     except Exception as e:
         results["coingecko"] = str(e)
 

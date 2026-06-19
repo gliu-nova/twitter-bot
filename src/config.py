@@ -27,9 +27,15 @@ def _normalize_rules(ind: dict[str, Any]) -> list[dict[str, Any]]:
     return rules
 
 
+def _source_fetch_defaults(source: str) -> dict[str, Any]:
+    if source == "coingecko":
+        return {"fetch_interval_hours": 24}
+    return {}
+
+
 def _source_quality_defaults(source: str) -> dict[str, Any]:
     if source in ("coingecko", "fear_greed"):
-        return {"schedule": "crypto_24_7", "max_stale_hours": 12}
+        return {"schedule": "crypto_24_7", "max_stale_hours": 36}
     if source == "yahoo":
         return {"schedule": "us_equity", "max_stale_hours": 48}
     return {"schedule": "macro", "max_stale_hours": 720}
@@ -43,4 +49,5 @@ def indicator_settings(cfg: dict[str, Any], key: str) -> dict[str, Any]:
     dq = cfg.get("defaults", {}).get("quality") or {}
     iq = ind.get("quality") or {}
     merged["quality"] = {**_source_quality_defaults(merged["source"]), **dq, **iq}
+    merged.update({k: v for k, v in _source_fetch_defaults(merged["source"]).items() if k not in ind})
     return merged

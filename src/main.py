@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from src.alerts import check_alert
 from src.config import ROOT, indicator_settings, load_config
-from src.db import connect, record_alert, save_reading
+from src.db import connect, hours_since_last_fetch, last_reading, record_alert, save_reading
 from src.fetch import FetchError, fetch_indicator
 from src.quality import QualityError, check_api_health, run_quality_checks
 from src.twitter_client import post_tweet
@@ -25,6 +25,16 @@ def _source_for_health(source: str) -> str:
     return source
 
 
+def _use_cached(conn, key: str, interval: float) -> tuple[float, str] | None:
+    elapsed = hours_since_last_fetch(conn, key)
+    if elapsed is None or elapsed >= interval:
+        return None
+    row = last_reading(conn, key)
+    if not row:
+        return None
+    return float(row["value"]), row["observed_at"]
+
+
 def run(only: str | None = None, *, health_only: bool = False) -> int:
     load_dotenv(ROOT / ".env")
     cfg = load_config()
@@ -32,7 +42,11 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
     health = check_api_health()
     print("API health:", ", ".join(f"{k}={v}" for k, v in health.items()))
     if health_only:
-        return 0 if all(v == "ok" for v in health.values()) else 1
+        ok = all(
+            v == "ok" or (k == "coingecko" and "rate_limited" in v)
+            for k, v in health.items()
+        )
+        return 0 if ok else 1
 
     conn = connect()
     keys = [only] if only else list(cfg["indicators"].keys())
@@ -46,7 +60,25 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
             continue
         settings = indicator_settings(cfg, key)
         src_health = _source_for_health(settings["source"])
-        if health.get(src_health) != "ok":
+        interval = settings.get("fetch_interval_hours")
+        cached = _use_cached(conn, key, interval) if interval else None
+
+        if cached:
+            value, observed_at = cached
+            print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [cached, fetch every {interval:g}h]")
+            continue
+
+        health_msg = health.get(src_health, "")
+        api_ok = health_msg == "ok" or (
+            src_health == "coingecko" and "rate_limited" in health_msg
+        )
+        if not api_ok and settings["source"] == "coingecko" and last_reading(conn, key):
+            row = last_reading(conn, key)
+            value, observed_at = float(row["value"]), row["observed_at"]
+            print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [cached, API: {health.get(src_health)}]")
+            continue
+
+        if not api_ok:
             print(f"[{key}] skipped: API unhealthy ({src_health})", file=sys.stderr)
             errors += 1
             continue
@@ -54,6 +86,11 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
         try:
             value, observed_at = fetch_indicator(settings)
         except FetchError as e:
+            if settings["source"] == "coingecko" and last_reading(conn, key):
+                row = last_reading(conn, key)
+                value, observed_at = float(row["value"]), row["observed_at"]
+                print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [cached after fetch error]")
+                continue
             print(f"[{key}] fetch failed: {e}", file=sys.stderr)
             errors += 1
             continue

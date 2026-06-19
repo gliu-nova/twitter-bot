@@ -122,6 +122,8 @@ Before saving or tweeting, each reading passes:
 python run.py --health   # API health only
 ```
 
+**CoinGecko (BTC/ETH/SOL)** fetches at most once per 24 hours to respect free-tier rate limits. Other indicators still poll hourly. Between crypto fetches, cached prices are reused (no duplicate tweets for unchanged data).
+
 ## Hourly schedule (macOS)
 
 ```bash
