@@ -30,6 +30,8 @@ CONTEXT_HINTS: dict[str, str] = {
     "consumer_sentiment": "Consumer tone feeds spending and growth expectations",
     "oil": "Energy move feeds inflation expectations",
     "hy_spread": "Credit spreads are a real-time risk appetite gauge",
+    "pmi_manufacturing": "Regional Fed surveys lead ISM — watch follow-through in factory data",
+    "ism_services": "Services activity drives most of GDP — watch employment and consumer data",
 }
 
 

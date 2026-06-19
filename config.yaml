@@ -139,8 +139,8 @@ posting:
     pmi_manufacturing:
       themes: [risk_on]
       category: macro_data
-      rarity: 65
-      audience_relevance: 65
+      rarity: 70
+      audience_relevance: 70
     ism_services:
       themes: [risk_on]
       category: macro_data
@@ -204,6 +204,8 @@ indicators:
     rules:
       - type: crosses_above
         value: 30
+      - type: crosses_below
+        value: 15
 
   dxy:
     name: "US Dollar Index (DXY)"
@@ -366,19 +368,24 @@ indicators:
     emergency_alert: 18
 
   pmi_manufacturing:
-    name: "PMI Manufacturing (Industrial Production)"
+    name: "Philly Fed Manufacturing Index (ISM PMI proxy)"
     source: fred
-    series: IPMAN
+    series: GACDFSA066MSFRBPHI
     cooldown_hours: 168
-    normal_alert: 1.5
-    major_alert: 2
-    emergency_alert: 3
+    alert_unit: absolute
+    normal_alert: 8
+    major_alert: 12
+    emergency_alert: 18
+    rules:
+      - type: crosses_below
+        value: 0
 
   ism_services:
-    name: "ISM Services PMI proxy (Chicago Fed Nonmfg)"
+    name: "Chicago Fed Nonmfg Activity (ISM Services proxy)"
     source: fred
     series: CFSBCACTIVITYNMFG
     cooldown_hours: 168
+    alert_unit: absolute
     normal_alert: 10
     major_alert: 15
     emergency_alert: 22
@@ -439,14 +446,12 @@ indicators:
         value: 3.0
       - type: crosses_below
         value: 3.0
-      - type: percent_change
-        threshold: 12
 
   m2:
     name: "M2 Money Supply"
     source: fred
     series: M2SL
     cooldown_hours: 168
-    normal_alert: 0.5
-    major_alert: 1
-    emergency_alert: 1.5
+    normal_alert: 1
+    major_alert: 1.5
+    emergency_alert: 2

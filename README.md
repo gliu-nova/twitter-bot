@@ -20,7 +20,7 @@ Monitors market and macro indicators, stores readings in SQLite, and posts to X/
 | `treasury_10y` | 10Y Treasury Yield | FRED |
 | `yield_curve` | Yield Curve (10Y − 2Y) | FRED |
 | `jobless_claims` | Initial Jobless Claims | FRED |
-| `pmi_manufacturing` | Manufacturing Production Index | FRED |
+| `pmi_manufacturing` | Philly Fed Manufacturing Index (ISM PMI proxy) | FRED |
 | `ism_services` | Chicago Fed Nonmfg Activity (ISM Services proxy) | FRED |
 | `unemployment` | Unemployment Rate | FRED |
 | `mortgage_30y` | 30Y Mortgage Rate | FRED |
@@ -180,6 +180,6 @@ python run.py --indicator vix    # one indicator
 
 ## Notes
 
-- **ISM Services PMI** is not on free FRED; `ism_services` uses the Chicago Fed Nonmanufacturing Activity Index as a proxy. Change `series` in `config.yaml` if you have another feed.
+- **ISM PMI data was removed from FRED in 2016.** `pmi_manufacturing` uses the Philadelphia Fed Manufacturing diffusion index; `ism_services` uses the Chicago Fed Nonmanufacturing Activity Index. Both names include "proxy" in tweets.
 - **First poll** only stores data; percent/cross rules need a prior reading.
 - Tweets are capped at 280 characters.
