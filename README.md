@@ -146,14 +146,60 @@ TWITTER_ACCESS_TOKEN_SECRET=...
 6. **Test in dry-run first** — keep `DRY_RUN=1` in `.env`. Run `python run.py` and confirm alerts print as `[DRY RUN] Would tweet:...`
 7. **Go live** — set `DRY_RUN=0`, run again. A triggered rule posts to your account.
 
-### 3. Schedule automatic checks
+### 3. Run 24/7 with GitHub Actions (recommended)
 
-```cron
-# Every hour during weekdays
-0 * * * 1-5 cd /path/to/twitter-bot && .venv/bin/python run.py >> data/bot.log 2>&1
+Your Mac does **not** need to stay awake. GitHub runs the bot on a schedule in the cloud.
+
+#### Step 1 — Add repository secrets
+
+In GitHub: **your repo → Settings → Secrets and variables → Actions → New repository secret**
+
+Add each of these (copy values from your local `.env`):
+
+| Secret name | Value |
+|-------------|-------|
+| `FRED_API_KEY` | FRED API key |
+| `TWITTER_API_KEY` | Twitter API key (consumer) |
+| `TWITTER_API_SECRET` | Twitter API secret |
+| `TWITTER_ACCESS_TOKEN` | Your account access token |
+| `TWITTER_ACCESS_TOKEN_SECRET` | Your account access token secret |
+
+Do **not** commit `.env` to git.
+
+#### Step 2 — Enable Actions
+
+1. Go to **Actions** tab in your repo
+2. If prompted, click **Enable workflows**
+3. Select **Twitter Bot** workflow
+4. Click **Run workflow** once to test manually
+
+Scheduled runs start automatically every **5 minutes** via `.github/workflows/bot.yml`.
+
+#### Step 3 — Verify
+
+- **Actions** tab → latest run should be green
+- Expand **Run bot** step to see indicator fetches
+- When a threshold fires, the bot tweets from your account (`DRY_RUN=0` in the workflow)
+
+#### State persistence
+
+SQLite (`data/indicators.db`) is cached between runs so readings, cooldowns, and daily post counts survive. First run starts fresh; history builds over time.
+
+#### Private repo note
+
+GitHub Free private repos include **2,000 Actions minutes/month**. At ~5 min intervals (~8,600 runs/month), you may exceed this on a private repo. Options:
+
+- Make the repo **public** (Actions free for public repos)
+- Upgrade GitHub plan for more minutes
+- Slow the cron in `.github/workflows/bot.yml` (e.g. `*/10 * * * *`)
+
+#### Optional: stop local Mac scheduler
+
+If you used launchd before, disable it so you don't double-post:
+
+```bash
+launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
 ```
-
-Or use `launchd` on macOS for a local always-on scheduler.
 
 ## Data quality safeguards
 
@@ -185,13 +231,13 @@ The bot **ticks every 5 minutes** but each indicator fetches on its own tier (po
 
 Edit `config.yaml` → `scheduler:` to tune intervals.
 
-## macOS schedule (launchd)
+## Local Mac schedule (optional)
+
+For development only — use GitHub Actions for 24/7 production.
 
 ```bash
-./scripts/install-schedule.sh   # re-install after updates (5-min tick)
-# Logs: data/bot.log
-# `state = not running` in launchctl is normal between ticks
-# Uninstall: launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
+./scripts/install-schedule.sh
+launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot   # uninstall
 ```
 
 ## Run
