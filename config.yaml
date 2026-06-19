@@ -1,3 +1,14 @@
+# Data polling — how often to fetch each tier (posting rules unchanged).
+# launchd ticks every tick_minutes; each indicator fetches on its own schedule.
+scheduler:
+  tick_minutes: 5
+  crypto_minutes: 10
+  market_minutes: 10
+  market_off_hours_minutes: 60
+  rates_minutes: 30
+  macro_hours: 6
+  housing_hours: 24
+
 # Posting engine — scoring, grouping, daily cap, buffers.
 # Threshold rules per indicator are still edited under `indicators:` below.
 posting:

@@ -7,10 +7,11 @@ from dotenv import load_dotenv
 
 from src.alerts import check_alert
 from src.config import ROOT, indicator_settings, load_config
-from src.db import connect, hours_since_last_fetch, last_reading, save_reading
+from src.db import connect, last_reading, save_reading
 from src.fetch import FetchError, fetch_indicator
 from src.posting import enqueue_alert, process_posting_queue
 from src.quality import QualityError, check_api_health, run_quality_checks
+from src.scheduler import interval_label, is_fetch_due
 
 
 def _source_for_health(source: str) -> str:
@@ -25,16 +26,6 @@ def _source_for_health(source: str) -> str:
     if source == "fear_greed":
         return "fear_greed"
     return source
-
-
-def _use_cached(conn, key: str, interval: float) -> tuple[float, str] | None:
-    elapsed = hours_since_last_fetch(conn, key)
-    if elapsed is None or elapsed >= interval:
-        return None
-    row = last_reading(conn, key)
-    if not row:
-        return None
-    return float(row["value"]), row["observed_at"]
 
 
 def run(only: str | None = None, *, health_only: bool = False, force_post: bool = False) -> int:
@@ -52,6 +43,7 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     errors = 0
     skipped_alerts = 0
     queued = 0
+    skipped_fetch = 0
 
     for key in keys:
         if key not in cfg["indicators"]:
@@ -59,15 +51,13 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             errors += 1
             continue
         settings = indicator_settings(cfg, key)
-        src_health = _source_for_health(settings["source"])
-        interval = settings.get("fetch_interval_hours")
-        cached = _use_cached(conn, key, interval) if interval else None
+        force_fetch = only is not None
 
-        if cached:
-            value, observed_at = cached
-            print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [cached, fetch every {interval:g}h]")
+        if not is_fetch_due(conn, settings, cfg, force=force_fetch):
+            skipped_fetch += 1
             continue
 
+        src_health = _source_for_health(settings["source"])
         health_msg = health.get(src_health, "")
         api_ok = health_msg == "ok"
         if not api_ok:
@@ -89,7 +79,8 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             errors += 1
             continue
 
-        print(f"[{key}] {settings['name']}: {value:g} ({observed_at})")
+        label = interval_label(settings, cfg)
+        print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [poll every {label}]")
 
         should_alert, alert = check_alert(conn, settings, value)
         save_reading(conn, key, value, observed_at)
@@ -110,6 +101,9 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
 
         enqueue_alert(conn, cfg, alert)
         queued += 1
+
+    if skipped_fetch and not only:
+        print(f"Skipped {skipped_fetch} indicator(s) not due for fetch")
 
     if queued:
         print(f"Queued {queued} alert(s) for posting decision")

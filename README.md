@@ -171,12 +171,26 @@ python run.py --health   # API health only
 
 **Crypto (BTC/ETH/SOL)** uses Yahoo Finance hourly, cross-checked against Binance public API.
 
-## Hourly schedule (macOS)
+## Polling schedule
+
+The bot **ticks every 5 minutes** but each indicator fetches on its own tier (posting rules unchanged — still max 2 tweets/day + buffer):
+
+| Tier | Indicators | Poll interval |
+|------|------------|---------------|
+| Crypto 24/7 | BTC, ETH, SOL, Fear & Greed | every 10 min |
+| US equity / volatile | SPY, QQQ, VIX, DXY, Gold, Silver, Oil | every 10 min (market hours), 60 min off-hours |
+| Rates & FX | 10Y, yield curve, Fed funds, MOVE, HY spread | every 30 min |
+| Macro (FRED) | CPI, unemployment, PMI proxies, M2, etc. | every 6 hours |
+| Housing / monthly | Case-Shiller, 30Y mortgage | every 24 hours |
+
+Edit `config.yaml` → `scheduler:` to tune intervals.
+
+## macOS schedule (launchd)
 
 ```bash
-./scripts/install-schedule.sh   # launchd job every 3600s
+./scripts/install-schedule.sh   # re-install after updates (5-min tick)
 # Logs: data/bot.log
-# `state = not running` in launchctl is normal between hourly runs
+# `state = not running` in launchctl is normal between ticks
 # Uninstall: launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
 ```
 

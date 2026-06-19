@@ -8,5 +8,6 @@ chmod +x "$DIR/scripts/run-bot.sh"
 launchctl bootout "gui/$(id -u)/com.georgeliu.twitter-bot" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST_DST"
 launchctl enable "gui/$(id -u)/com.georgeliu.twitter-bot"
-echo "Installed hourly schedule: com.georgeliu.twitter-bot"
+echo "Installed 5-minute tick schedule: com.georgeliu.twitter-bot"
+echo "Per-indicator poll rates are in config.yaml → scheduler:"
 echo "Logs: $DIR/data/bot.log"

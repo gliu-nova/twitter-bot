@@ -67,11 +67,18 @@ def last_reading(conn: sqlite3.Connection, indicator: str) -> sqlite3.Row | None
 
 
 def hours_since_last_fetch(conn: sqlite3.Connection, indicator: str) -> float | None:
+    mins = minutes_since_last_fetch(conn, indicator)
+    if mins is None:
+        return None
+    return mins / 60
+
+
+def minutes_since_last_fetch(conn: sqlite3.Connection, indicator: str) -> float | None:
     row = last_reading(conn, indicator)
     if not row:
         return None
     recorded = datetime.fromisoformat(row["recorded_at"])
-    return (datetime.now(timezone.utc) - recorded).total_seconds() / 3600
+    return (datetime.now(timezone.utc) - recorded).total_seconds() / 60
 
 
 def save_reading(conn: sqlite3.Connection, indicator: str, value: float, observed_at: str) -> None:
