@@ -1,3 +1,158 @@
+# Posting engine — scoring, grouping, daily cap, buffers.
+# Threshold rules per indicator are still edited under `indicators:` below.
+posting:
+  daily_post_cap: 2
+  emergency_threshold: 90
+  high_single_threshold: 85
+  multi_threshold: 120
+  min_cluster_size: 3
+  market_buffer_minutes: 30
+  group_time_window_hours: 8
+  indicator_cooldown_hours: 36
+  alert_max_age_hours: 12
+  max_crypto_streak: 2
+  diversity_lookback: 3
+  magnitude_cap_pct: 25
+  freshness_default: 90
+  score_weights:
+    magnitude: 0.40
+    rarity: 0.30
+    audience: 0.20
+    freshness: 0.10
+
+  indicator_themes:
+    btc:
+      themes: [risk_on, crypto]
+      category: crypto
+      rarity: 70
+      audience_relevance: 85
+    eth:
+      themes: [risk_on, crypto]
+      category: crypto
+      rarity: 65
+      audience_relevance: 80
+    sol:
+      themes: [risk_on, crypto]
+      category: crypto
+      rarity: 60
+      audience_relevance: 70
+    fear_greed:
+      themes: [risk_on, crypto]
+      category: crypto
+      rarity: 75
+      audience_relevance: 75
+    sp500:
+      themes: [risk_on, equities]
+      category: equities_vol
+      rarity: 80
+      audience_relevance: 90
+      standalone_major: true
+    nasdaq100:
+      themes: [risk_on, equities]
+      category: equities_vol
+      rarity: 75
+      audience_relevance: 85
+    vix:
+      themes: [risk_off]
+      category: equities_vol
+      rarity: 85
+      audience_relevance: 90
+      standalone_major: true
+    dxy:
+      themes: [tightening_conditions]
+      category: rates_fx
+      rarity: 70
+      audience_relevance: 75
+    treasury_10y:
+      themes: [tightening_conditions]
+      category: rates_fx
+      rarity: 80
+      audience_relevance: 85
+      standalone_major: true
+    yield_curve:
+      themes: [easing_conditions]
+      category: rates_fx
+      rarity: 90
+      audience_relevance: 90
+      standalone_major: true
+    fed_funds:
+      themes: [tightening_conditions]
+      category: rates_fx
+      rarity: 95
+      audience_relevance: 95
+      standalone_major: true
+    cpi_yoy:
+      themes: [inflation_pressure]
+      category: macro_data
+      rarity: 95
+      audience_relevance: 95
+      standalone_major: true
+    oil:
+      themes: [inflation_pressure]
+      category: commodities
+      rarity: 70
+      audience_relevance: 70
+    mortgage_30y:
+      themes: [easing_conditions]
+      category: housing
+      rarity: 75
+      audience_relevance: 70
+    consumer_sentiment:
+      themes: [risk_off]
+      category: macro_data
+      rarity: 65
+      audience_relevance: 65
+    case_shiller:
+      themes: [housing]
+      category: housing
+      rarity: 70
+      audience_relevance: 65
+    gold:
+      themes: [risk_off]
+      category: commodities
+      rarity: 60
+      audience_relevance: 60
+    silver:
+      themes: [risk_on]
+      category: commodities
+      rarity: 50
+      audience_relevance: 45
+    hy_spread:
+      themes: [risk_off]
+      category: equities_vol
+      rarity: 75
+      audience_relevance: 70
+    move:
+      themes: [risk_off]
+      category: rates_fx
+      rarity: 70
+      audience_relevance: 65
+    jobless_claims:
+      themes: [risk_off]
+      category: macro_data
+      rarity: 70
+      audience_relevance: 70
+    unemployment:
+      themes: [risk_off]
+      category: macro_data
+      rarity: 80
+      audience_relevance: 80
+    pmi_manufacturing:
+      themes: [risk_on]
+      category: macro_data
+      rarity: 65
+      audience_relevance: 65
+    ism_services:
+      themes: [risk_on]
+      category: macro_data
+      rarity: 65
+      audience_relevance: 60
+    m2:
+      themes: [easing_conditions]
+      category: macro_data
+      rarity: 55
+      audience_relevance: 50
+
 # Per-indicator alert rules — each indicator has its own `rules` list.
 # Any matching rule triggers a tweet (subject to cooldown_hours).
 #

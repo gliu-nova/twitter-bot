@@ -1,6 +1,6 @@
 # Twitter Indicator Bot
 
-Monitors market and macro indicators, stores readings in SQLite, and posts to X/Twitter when **per-indicator rules** you define are triggered.
+Monitors market and macro indicators, stores readings in SQLite, and posts to X/Twitter when **per-indicator rules** you define are triggered. A **posting engine** scores, groups, and rate-limits tweets so you get 2 high-quality posts per day (more for emergencies).
 
 ## Indicators (25)
 
@@ -59,7 +59,38 @@ btc:
 
 **Rule types:** `percent_change`, `percent_from_baseline`, `above`, `below`, `crosses_above`, `crosses_below`
 
-**`cooldown_hours`** — per indicator; prevents repeat tweets for the same metric.
+**`cooldown_hours`** — per indicator; prevents repeat *alerts* for the same metric during fetch cycles.
+
+## Posting engine
+
+Alerts are **queued and batched**, not tweeted instantly.
+
+1. **Score** each alert: `(Magnitude × 40%) + (Rarity × 30%) + (Audience × 20%) + (Freshness × 10%)`
+2. **Buffer** market alerts 30 min (configurable) so BTC/ETH/SOL don't become 3 separate tweets
+3. **Macro recap** batch flushes after 4:15 PM ET
+4. **Decide**: standalone tweet if score ≥ 85 (CPI, Fed, VIX>30, yield curve, etc.) OR multi-indicator tweet when 3+ alerts share a theme
+5. **Daily cap**: 2 posts/day (emergencies with score ≥ 90 bypass the cap)
+6. **Cooldown**: same indicator not posted again within 36h unless emergency
+7. **Diversity**: avoids 3 crypto tweets in a row — prefers macro when possible
+
+Edit thresholds in `config.yaml` under `posting:`:
+
+```yaml
+posting:
+  daily_post_cap: 2
+  emergency_threshold: 90
+  high_single_threshold: 85
+  multi_threshold: 120
+  market_buffer_minutes: 30
+  indicator_cooldown_hours: 36
+```
+
+Per-indicator **themes** (for grouping) live in `posting.indicator_themes`. Threshold **rules** stay under each `indicators:` entry.
+
+```bash
+DRY_RUN=1 python run.py          # logs [DRY RUN] Would tweet:...
+python run.py --force-post       # flush queue immediately (testing)
+```
 
 ## Setup
 

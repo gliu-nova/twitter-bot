@@ -46,6 +46,18 @@ def indicator_settings(cfg: dict[str, Any], key: str) -> dict[str, Any]:
     ind = cfg["indicators"][key]
     merged = {**defaults, **ind, "key": key}
     merged["rules"] = _normalize_rules(merged)
+
+    # Apply indicator metadata defaults from posting.themes map
+    theme_map = (cfg.get("posting") or {}).get("indicator_themes") or {}
+    if key in theme_map and "themes" not in ind:
+        meta = theme_map[key]
+        if isinstance(meta, dict):
+            merged.setdefault("themes", meta.get("themes", []))
+            merged.setdefault("category", meta.get("category"))
+            merged.setdefault("rarity", meta.get("rarity"))
+            merged.setdefault("audience_relevance", meta.get("audience_relevance"))
+            merged.setdefault("standalone_major", meta.get("standalone_major", False))
+
     dq = cfg.get("defaults", {}).get("quality") or {}
     iq = ind.get("quality") or {}
     merged["quality"] = {**_source_quality_defaults(merged["source"]), **dq, **iq}

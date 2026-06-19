@@ -7,10 +7,10 @@ from dotenv import load_dotenv
 
 from src.alerts import check_alert
 from src.config import ROOT, indicator_settings, load_config
-from src.db import connect, hours_since_last_fetch, last_reading, record_alert, save_reading
+from src.db import connect, hours_since_last_fetch, last_reading, save_reading
 from src.fetch import FetchError, fetch_indicator
+from src.posting import enqueue_alert, process_posting_queue
 from src.quality import QualityError, check_api_health, run_quality_checks
-from src.twitter_client import post_tweet
 
 
 def _source_for_health(source: str) -> str:
@@ -37,7 +37,7 @@ def _use_cached(conn, key: str, interval: float) -> tuple[float, str] | None:
     return float(row["value"]), row["observed_at"]
 
 
-def run(only: str | None = None, *, health_only: bool = False) -> int:
+def run(only: str | None = None, *, health_only: bool = False, force_post: bool = False) -> int:
     load_dotenv(ROOT / ".env")
     cfg = load_config()
 
@@ -51,6 +51,7 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
     keys = [only] if only else list(cfg["indicators"].keys())
     errors = 0
     skipped_alerts = 0
+    queued = 0
 
     for key in keys:
         if key not in cfg["indicators"]:
@@ -90,10 +91,10 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
 
         print(f"[{key}] {settings['name']}: {value:g} ({observed_at})")
 
-        should_alert, message = check_alert(conn, settings, value)
+        should_alert, alert = check_alert(conn, settings, value)
         save_reading(conn, key, value, observed_at)
 
-        if not should_alert or not message:
+        if not should_alert or not alert:
             continue
 
         try:
@@ -107,8 +108,14 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
             skipped_alerts += 1
             continue
 
-        post_tweet(message)
-        record_alert(conn, key, value)
+        enqueue_alert(conn, cfg, alert)
+        queued += 1
+
+    if queued:
+        print(f"Queued {queued} alert(s) for posting decision")
+    posted = process_posting_queue(conn, cfg, force=force_post)
+    if posted:
+        print(f"Posted {posted} tweet(s)")
 
     conn.close()
     if skipped_alerts:
@@ -120,8 +127,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch indicators and tweet on threshold crossings")
     parser.add_argument("--indicator", help="Run a single indicator key from config.yaml")
     parser.add_argument("--health", action="store_true", help="Run API health checks only")
+    parser.add_argument(
+        "--force-post",
+        action="store_true",
+        help="Flush posting queue immediately (bypass buffer window)",
+    )
     args = parser.parse_args()
-    raise SystemExit(run(args.indicator, health_only=args.health))
+    raise SystemExit(run(args.indicator, health_only=args.health, force_post=args.force_post))
 
 
 if __name__ == "__main__":
