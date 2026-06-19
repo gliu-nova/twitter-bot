@@ -206,6 +206,38 @@ def recent_tweet_categories(conn: sqlite3.Connection, limit: int = 5) -> list[st
     return [r["primary_category"] for r in rows]
 
 
+def daily_readings_since(
+    conn: sqlite3.Connection,
+    indicator: str,
+    *,
+    months: int = 6,
+) -> list[tuple[str, float]]:
+    """Last reading per calendar day for the past N months."""
+    rows = conn.execute(
+        """SELECT value, observed_at FROM readings
+           WHERE indicator = ? ORDER BY observed_at ASC""",
+        (indicator,),
+    ).fetchall()
+    if not rows:
+        return []
+
+    cutoff = datetime.now(timezone.utc).date()
+    # approximate month window
+    from datetime import timedelta
+
+    start = cutoff - timedelta(days=months * 31)
+    by_day: dict[str, float] = {}
+    for row in rows:
+        day = str(row["observed_at"])[:10]
+        try:
+            day_date = datetime.fromisoformat(day).date()
+        except ValueError:
+            continue
+        if day_date >= start:
+            by_day[day] = float(row["value"])
+    return sorted(by_day.items())
+
+
 def hours_since_indicator_post(conn: sqlite3.Connection, indicator: str) -> float | None:
     row = conn.execute(
         "SELECT posted_at FROM post_log WHERE indicators LIKE ? ORDER BY posted_at DESC LIMIT 1",

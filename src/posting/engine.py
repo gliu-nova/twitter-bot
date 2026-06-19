@@ -17,6 +17,7 @@ from src.db import (
     record_alert,
     record_post,
 )
+from src.posting.charts import chart_for_decision
 from src.posting.compose import compose_multi_tweet, compose_single_tweet
 from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
@@ -258,8 +259,19 @@ def process_posting_queue(
                 is_emergency=decision.is_emergency,
             )
 
+        chart_path = chart_for_decision(
+            conn,
+            cfg,
+            tweet_type=decision.tweet_type,
+            alerts=decision.alerts,
+            theme=decision.theme,
+            is_emergency=decision.is_emergency,
+        )
+        if chart_path:
+            print(f"[posting] chart: {chart_path}")
+
         print(f"[posting] {decision.tweet_type} score={decision.score} emergency={decision.is_emergency}")
-        post_tweet(text)
+        post_tweet(text, media_path=chart_path)
 
         alert_ids = [a.db_id for a in decision.alerts if a.db_id]
         indicators = [a.indicator for a in decision.alerts]

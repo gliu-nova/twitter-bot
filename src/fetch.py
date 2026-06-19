@@ -155,6 +155,83 @@ def _fear_greed_latest() -> tuple[float, str]:
     return float(entry["value"]), observed
 
 
+def fetch_chart_history(settings: dict[str, Any], *, months: int = 6) -> list[tuple[str, float]]:
+    """Daily history for chart rendering. Falls back to source APIs."""
+    source = settings["source"]
+    period = f"{months}mo"
+
+    if source == "yahoo":
+        ticker = yf.Ticker(settings["symbol"])
+        hist = ticker.history(period=period)
+        if hist.empty:
+            return []
+        out: list[tuple[str, float]] = []
+        for idx, row in hist.iterrows():
+            out.append((idx.strftime("%Y-%m-%d"), float(row["Close"])))
+        return out
+
+    if source == "fred":
+        limit = max(30, months * 31)
+        resp = requests.get(
+            FRED_BASE,
+            params={
+                "series_id": settings["series"],
+                "api_key": _fred_api_key(),
+                "file_type": "json",
+                "sort_order": "desc",
+                "limit": limit,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        observations = [
+            (obs["date"], float(obs["value"]))
+            for obs in resp.json().get("observations", [])
+            if obs.get("value") not in (None, ".", "")
+        ]
+        return sorted(observations)
+
+    if source == "fred_cpi_yoy":
+        limit = max(24, months * 2 + 14)
+        resp = requests.get(
+            FRED_BASE,
+            params={
+                "series_id": settings["series"],
+                "api_key": _fred_api_key(),
+                "file_type": "json",
+                "sort_order": "desc",
+                "limit": limit,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        raw = sorted(
+            (obs["date"], float(obs["value"]))
+            for obs in resp.json().get("observations", [])
+            if obs.get("value") not in (None, ".", "")
+        )
+        return [
+            (d, ((v / raw[i - 12][1]) - 1) * 100)
+            for i, (d, v) in enumerate(raw)
+            if i >= 12 and raw[i - 12][1]
+        ]
+
+    if source == "fear_greed":
+        resp = requests.get(FEAR_GREED_BASE, params={"limit": min(200, months * 31)}, timeout=30)
+        resp.raise_for_status()
+        entries = resp.json().get("data", [])
+        out = []
+        for e in reversed(entries):
+            ts = e.get("timestamp")
+            if not ts:
+                continue
+            day = datetime.fromtimestamp(int(ts), timezone.utc).strftime("%Y-%m-%d")
+            out.append((day, float(e["value"])))
+        return out
+
+    return []
+
+
 def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
     source = settings["source"]
     if source == "yahoo":

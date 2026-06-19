@@ -99,6 +99,15 @@ DRY_RUN=1 python run.py          # logs [DRY RUN] Would tweet:...
 python run.py --force-post       # flush queue immediately (testing)
 ```
 
+## Charts on tweets
+
+Graphics are attached automatically for:
+
+- **Emergency single alerts** — 6-month line chart (green gain / red loss) with threshold lines and 6M high/low context
+- **All multi-indicator tweets** — summary leaderboard card sorted by move size
+
+Charts save to `data/charts/` and upload via Twitter media API. Under ~2MB for fast posting.
+
 ## Setup
 
 ```bash
