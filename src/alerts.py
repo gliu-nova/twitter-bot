@@ -19,6 +19,53 @@ def _in_cooldown(last_alert_at: str | None, hours: float) -> bool:
     return datetime.now(timezone.utc) - last < timedelta(hours=hours)
 
 
+def _eval_rule(rule: dict[str, Any], prev: float | None, value: float) -> str | None:
+    rtype = rule["type"]
+
+    if rtype == "percent_change":
+        if prev is None:
+            return None
+        change = _pct_change(prev, value)
+        threshold = float(rule["threshold"])
+        if abs(change) >= threshold:
+            direction = "up" if change > 0 else "down"
+            return f"moved {abs(change):.1f}% {direction} (limit ±{threshold:g}%)"
+        return None
+
+    if rtype == "above":
+        if value > float(rule["value"]):
+            return f"above {rule['value']:g}"
+        return None
+
+    if rtype == "below":
+        if value < float(rule["value"]):
+            return f"below {rule['value']:g}"
+        return None
+
+    if rtype == "crosses_above":
+        bound = float(rule["value"])
+        if prev is not None and prev < bound <= value:
+            return f"crossed above {bound:g}"
+        return None
+
+    if rtype == "crosses_below":
+        bound = float(rule["value"])
+        if prev is not None and prev > bound >= value:
+            return f"crossed below {bound:g}"
+        return None
+
+    if rtype == "percent_from_baseline":
+        baseline = float(rule["baseline"])
+        threshold = float(rule["threshold"])
+        change = _pct_change(baseline, value)
+        if abs(change) >= threshold:
+            direction = "up" if change > 0 else "down"
+            return f"{abs(change):.1f}% {direction} from baseline {baseline:g} (limit ±{threshold:g}%)"
+        return None
+
+    return None
+
+
 def check_alert(
     conn: sqlite3.Connection,
     settings: dict[str, Any],
@@ -26,9 +73,7 @@ def check_alert(
 ) -> tuple[bool, str | None]:
     key = settings["key"]
     name = settings["name"]
-    threshold_pct = settings.get("threshold_percent")
-    threshold_low = settings.get("threshold_low")
-    threshold_high = settings.get("threshold_high")
+    rules = settings.get("rules") or []
     cooldown = float(settings.get("cooldown_hours", 24))
 
     prev_row = conn.execute(
@@ -44,24 +89,13 @@ def check_alert(
     if _in_cooldown(last_alert_at, cooldown):
         return False, None
 
-    reasons: list[str] = []
-
-    if threshold_low is not None and value < threshold_low:
-        reasons.append(f"crossed below {threshold_low:g}")
-    if threshold_high is not None and value > threshold_high:
-        reasons.append(f"crossed above {threshold_high:g}")
-
-    if prev_row is not None and threshold_pct is not None:
-        prev = float(prev_row["value"])
-        change = _pct_change(prev, value)
-        if abs(change) >= threshold_pct:
-            direction = "up" if change > 0 else "down"
-            reasons.append(f"moved {abs(change):.1f}% {direction} (threshold ±{threshold_pct:g}%)")
+    prev = float(prev_row["value"]) if prev_row else None
+    reasons = [msg for rule in rules if (msg := _eval_rule(rule, prev, value))]
 
     if not reasons:
         return False, None
 
-    prev_text = f"{float(prev_row['value']):g}" if prev_row else "n/a"
+    prev_text = f"{prev:g}" if prev is not None else "n/a"
     message = (
         f"📊 {name} alert\n"
         f"Now: {value:g}\n"

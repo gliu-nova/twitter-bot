@@ -14,9 +14,22 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _normalize_rules(ind: dict[str, Any]) -> list[dict[str, Any]]:
+    if ind.get("rules"):
+        return ind["rules"]
+    rules: list[dict[str, Any]] = []
+    if ind.get("threshold_percent") is not None:
+        rules.append({"type": "percent_change", "threshold": ind["threshold_percent"]})
+    if ind.get("threshold_low") is not None:
+        rules.append({"type": "crosses_below", "value": ind["threshold_low"]})
+    if ind.get("threshold_high") is not None:
+        rules.append({"type": "crosses_above", "value": ind["threshold_high"]})
+    return rules
+
+
 def indicator_settings(cfg: dict[str, Any], key: str) -> dict[str, Any]:
-    defaults = cfg.get("defaults", {})
+    defaults = {k: v for k, v in cfg.get("defaults", {}).items() if k != "rules"}
     ind = cfg["indicators"][key]
-    merged = {**defaults, **ind}
-    merged["key"] = key
+    merged = {**defaults, **ind, "key": key}
+    merged["rules"] = _normalize_rules(merged)
     return merged

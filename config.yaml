@@ -1,11 +1,17 @@
-# Global defaults — override per indicator below
+# Per-indicator alert rules — each indicator has its own `rules` list.
+# Any matching rule triggers a tweet (subject to cooldown_hours).
+#
+# Rule types:
+#   percent_change:     { threshold: 10 }           # ±10% vs last stored reading
+#   percent_from_baseline: { baseline: 100, threshold: 50 }
+#   above:              { value: 30 }              # value currently above level
+#   below:              { value: 0 }               # value currently below level
+#   crosses_above:      { value: 0 }               # was below, now at/above
+#   crosses_below:      { value: 0 }               # was above, now at/below
+#
+# First poll stores a baseline; percent/cross rules fire from the second poll onward.
+
 defaults:
-  # Alert when value moves this % vs last stored reading (example: 50 = ±50%)
-  threshold_percent: 50
-  # Optional absolute bounds (set null to disable)
-  threshold_low: null
-  threshold_high: null
-  # Hours before the same indicator can alert again
   cooldown_hours: 24
 
 indicators:
@@ -13,96 +19,226 @@ indicators:
     name: "S&P 500"
     source: yahoo
     symbol: "^GSPC"
-    threshold_percent: 5
+    cooldown_hours: 12
+    rules:
+      - type: percent_change
+        threshold: 3
+
+  nasdaq100:
+    name: "NASDAQ 100"
+    source: yahoo
+    symbol: "^NDX"
+    cooldown_hours: 12
+    rules:
+      - type: percent_change
+        threshold: 4
 
   vix:
     name: "VIX"
     source: yahoo
     symbol: "^VIX"
-    threshold_percent: 20
+    cooldown_hours: 6
+    rules:
+      - type: percent_change
+        threshold: 15
+      - type: crosses_above
+        value: 30
+
+  dxy:
+    name: "US Dollar Index (DXY)"
+    source: yahoo
+    symbol: "DX-Y.NYB"
+    rules:
+      - type: percent_change
+        threshold: 2
+
+  gold:
+    name: "Gold"
+    source: yahoo
+    symbol: "GC=F"
+    rules:
+      - type: percent_change
+        threshold: 3
+
+  silver:
+    name: "Silver"
+    source: yahoo
+    symbol: "SI=F"
+    rules:
+      - type: percent_change
+        threshold: 5
 
   oil:
     name: "WTI Crude Oil"
     source: fred
     series: DCOILWTICO
-    threshold_percent: 10
+    rules:
+      - type: percent_change
+        threshold: 8
+
+  move:
+    name: "MOVE Index"
+    source: yahoo
+    symbol: "^MOVE"
+    rules:
+      - type: percent_change
+        threshold: 10
+      - type: crosses_above
+        value: 120
+
+  hy_spread:
+    name: "High Yield Credit Spread"
+    source: fred
+    series: BAMLH0A0HYM2
+    rules:
+      - type: percent_change
+        threshold: 10
+      - type: crosses_above
+        value: 5
 
   btc:
     name: "Bitcoin"
     source: coingecko
     coin_id: bitcoin
-    threshold_percent: 10
+    cooldown_hours: 6
+    rules:
+      - type: percent_change
+        threshold: 8
 
   eth:
     name: "Ethereum"
     source: coingecko
     coin_id: ethereum
-    threshold_percent: 10
+    cooldown_hours: 6
+    rules:
+      - type: percent_change
+        threshold: 10
 
   sol:
     name: "Solana"
     source: coingecko
     coin_id: solana
-    threshold_percent: 15
+    cooldown_hours: 6
+    rules:
+      - type: percent_change
+        threshold: 12
+
+  fear_greed:
+    name: "Crypto Fear & Greed Index"
+    source: fear_greed
+    cooldown_hours: 12
+    rules:
+      - type: crosses_below
+        value: 25
+      - type: crosses_above
+        value: 75
 
   fed_funds:
     name: "Fed Funds Rate"
     source: fred
     series: DFF
-    threshold_percent: 10
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 5
 
   treasury_10y:
     name: "10Y Treasury Yield"
     source: fred
     series: DGS10
-    threshold_percent: 15
-
-  jobless_claims:
-    name: "Initial Jobless Claims"
-    source: fred
-    series: ICSA
-    threshold_percent: 15
-
-  pmi_manufacturing:
-    name: "PMI Manufacturing"
-    source: fred
-    series: IPMAN
-    threshold_percent: 5
-
-  unemployment:
-    name: "Unemployment Rate"
-    source: fred
-    series: UNRATE
-    threshold_percent: 10
-
-  mortgage_30y:
-    name: "30Y Mortgage Rate"
-    source: fred
-    series: MORTGAGE30US
-    threshold_percent: 10
-
-  consumer_sentiment:
-    name: "Consumer Sentiment"
-    source: fred
-    series: UMCSENT
-    threshold_percent: 10
-
-  case_shiller:
-    name: "Case-Shiller Home Prices"
-    source: fred
-    series: CSUSHPINSA
-    threshold_percent: 5
-
-  cpi_yoy:
-    name: "CPI Inflation (YoY %)"
-    source: fred_cpi_yoy
-    series: CPIAUCSL
-    threshold_percent: 10
+    rules:
+      - type: percent_change
+        threshold: 10
+      - type: crosses_above
+        value: 4.5
 
   yield_curve:
     name: "Yield Curve (10Y - 2Y)"
     source: fred
     series: T10Y2Y
-    threshold_percent: 50
-    threshold_low: 0
-    # Alert when spread inverts (crosses below 0) or moves sharply
+    rules:
+      - type: crosses_below
+        value: 0
+
+  jobless_claims:
+    name: "Initial Jobless Claims"
+    source: fred
+    series: ICSA
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 10
+
+  pmi_manufacturing:
+    name: "PMI Manufacturing (Industrial Production)"
+    source: fred
+    series: IPMAN
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 2
+
+  ism_services:
+    name: "ISM Services PMI proxy (Chicago Fed Nonmfg)"
+    source: fred
+    series: CFSBCACTIVITYNMFG
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 15
+      - type: crosses_below
+        value: 0
+
+  unemployment:
+    name: "Unemployment Rate"
+    source: fred
+    series: UNRATE
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 5
+
+  mortgage_30y:
+    name: "30Y Mortgage Rate"
+    source: fred
+    series: MORTGAGE30US
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 5
+
+  consumer_sentiment:
+    name: "Consumer Sentiment"
+    source: fred
+    series: UMCSENT
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 5
+
+  case_shiller:
+    name: "Case-Shiller Home Prices"
+    source: fred
+    series: CSUSHPINSA
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 2
+
+  cpi_yoy:
+    name: "CPI Inflation (YoY %)"
+    source: fred_cpi_yoy
+    series: CPIAUCSL
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 5
+
+  m2:
+    name: "M2 Money Supply"
+    source: fred
+    series: M2SL
+    cooldown_hours: 168
+    rules:
+      - type: percent_change
+        threshold: 1

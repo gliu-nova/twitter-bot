@@ -1,35 +1,65 @@
 # Twitter Indicator Bot
 
-Monitors macro and market indicators, stores readings in SQLite, and posts to X/Twitter when configurable thresholds are crossed.
+Monitors market and macro indicators, stores readings in SQLite, and posts to X/Twitter when **per-indicator rules** you define are triggered.
 
-## Indicators tracked
+## Indicators (25)
 
 | Key | Name | Source |
 |-----|------|--------|
-| `sp500` | S&P 500 | Yahoo Finance |
-| `vix` | VIX | Yahoo Finance |
+| `sp500` | S&P 500 | Yahoo |
+| `nasdaq100` | NASDAQ 100 | Yahoo |
+| `vix` | VIX | Yahoo |
+| `dxy` | US Dollar Index (DXY) | Yahoo |
+| `gold` / `silver` | Gold, Silver | Yahoo |
 | `oil` | WTI Crude Oil | FRED |
+| `move` | MOVE Index | Yahoo |
+| `hy_spread` | High Yield Credit Spread | FRED |
 | `btc` / `eth` / `sol` | Bitcoin, Ethereum, Solana | CoinGecko |
+| `fear_greed` | Crypto Fear & Greed Index | alternative.me |
 | `fed_funds` | Fed Funds Rate | FRED |
 | `treasury_10y` | 10Y Treasury Yield | FRED |
+| `yield_curve` | Yield Curve (10Y − 2Y) | FRED |
 | `jobless_claims` | Initial Jobless Claims | FRED |
-| `pmi_manufacturing` | Manufacturing Production Index | FRED (`IPMAN`) |
+| `pmi_manufacturing` | Manufacturing Production Index | FRED |
+| `ism_services` | Chicago Fed Nonmfg Activity (ISM Services proxy) | FRED |
 | `unemployment` | Unemployment Rate | FRED |
 | `mortgage_30y` | 30Y Mortgage Rate | FRED |
 | `consumer_sentiment` | Consumer Sentiment | FRED |
 | `case_shiller` | Case-Shiller Home Prices | FRED |
 | `cpi_yoy` | CPI Inflation (YoY %) | FRED (computed) |
-| `yield_curve` | Yield Curve (10Y − 2Y) | FRED |
+| `m2` | M2 Money Supply | FRED |
 
-## Thresholds
+## Custom rules per indicator
 
-Edit `config.yaml`. Each indicator supports:
+Edit `config.yaml`. **Each indicator has its own `rules` list** — not one global threshold.
 
-- **`threshold_percent`** — alert when value moves ±X% vs the last stored reading (your ±50% example; defaults vary per indicator)
-- **`threshold_low` / `threshold_high`** — alert on absolute boundary crossings (e.g. yield curve below `0`)
-- **`cooldown_hours`** — minimum hours between repeat alerts for the same indicator
+```yaml
+vix:
+  name: VIX
+  source: yahoo
+  symbol: "^VIX"
+  cooldown_hours: 6
+  rules:
+    - type: percent_change
+      threshold: 15          # alert if VIX moves ±15% vs last reading
+    - type: crosses_above
+      value: 30              # alert when VIX crosses above 30
 
-On first run there is no prior reading, so percent-based alerts only fire after the second poll.
+yield_curve:
+  rules:
+    - type: crosses_below
+      value: 0               # inversion alert
+
+btc:
+  rules:
+    - type: percent_from_baseline
+      baseline: 50000
+      threshold: 50            # ±50% from your chosen baseline
+```
+
+**Rule types:** `percent_change`, `percent_from_baseline`, `above`, `below`, `crosses_above`, `crosses_below`
+
+**`cooldown_hours`** — per indicator; prevents repeat tweets for the same metric.
 
 ## Setup
 
@@ -41,30 +71,52 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-1. **FRED API key** (free): https://fred.stlouisfed.org/docs/api/api_key.html → set `FRED_API_KEY` in `.env`
-2. **Twitter/X API**: Create a project at https://developer.x.com/ with **tweet write** permission. Set the four `TWITTER_*` vars in `.env`.
-3. Keep `DRY_RUN=1` while testing. Set `DRY_RUN=0` to post live tweets.
+### 1. FRED API key (free)
+
+1. Go to https://fred.stlouisfed.org/docs/api/api_key.html
+2. Create an account → request API key
+3. Add to `.env`: `FRED_API_KEY=your_key`
+
+### 2. Connect your X/Twitter account
+
+You need **write access** to post tweets from your account.
+
+1. **Developer account** — Apply at https://developer.x.com/ (may require describing your bot as automated market alerts).
+2. **Create a Project + App** in the [Developer Portal](https://developer.x.com/en/portal/dashboard).
+3. **App permissions** — Set to **Read and write** (not read-only).
+4. **Generate credentials:**
+   - API Key and Secret (Consumer Keys)
+   - Access Token and Secret (for **your** account — click "Generate" under User authentication)
+5. Add all four to `.env`:
+
+```env
+TWITTER_API_KEY=...
+TWITTER_API_SECRET=...
+TWITTER_ACCESS_TOKEN=...
+TWITTER_ACCESS_TOKEN_SECRET=...
+```
+
+6. **Test in dry-run first** — keep `DRY_RUN=1` in `.env`. Run `python run.py` and confirm alerts print as `[DRY RUN] Would tweet:...`
+7. **Go live** — set `DRY_RUN=0`, run again. A triggered rule posts to your account.
+
+### 3. Schedule automatic checks
+
+```cron
+# Every hour during weekdays
+0 * * * 1-5 cd /path/to/twitter-bot && .venv/bin/python run.py >> data/bot.log 2>&1
+```
+
+Or use `launchd` on macOS for a local always-on scheduler.
 
 ## Run
 
 ```bash
-# All indicators (dry run by default)
-python run.py
-
-# Single indicator
-python run.py --indicator vix
-```
-
-## Schedule (cron)
-
-Poll every hour during market hours, or daily for slow-moving macro data:
-
-```cron
-0 * * * * cd /path/to/twitter-bot && .venv/bin/python run.py >> data/bot.log 2>&1
+python run.py                    # all indicators
+python run.py --indicator vix    # one indicator
 ```
 
 ## Notes
 
-- **PMI**: FRED `IPMAN` is industrial production, not the ISM PMI headline number. Change `series` in `config.yaml` if you have a preferred feed.
-- **Percent thresholds** on slow monthly series (CPI, Case-Shiller) are intentionally high in the default config — tune per indicator.
+- **ISM Services PMI** is not on free FRED; `ism_services` uses the Chicago Fed Nonmanufacturing Activity Index as a proxy. Change `series` in `config.yaml` if you have another feed.
+- **First poll** only stores data; percent/cross rules need a prior reading.
 - Tweets are capped at 280 characters.

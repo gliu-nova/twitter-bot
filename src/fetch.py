@@ -9,6 +9,7 @@ import yfinance as yf
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3/simple/price"
+FEAR_GREED_BASE = "https://api.alternative.me/fng/"
 
 
 class FetchError(Exception):
@@ -101,6 +102,21 @@ def _coingecko_latest(coin_id: str) -> tuple[float, str]:
     return float(data[coin_id]["usd"]), today
 
 
+def _fear_greed_latest() -> tuple[float, str]:
+    resp = requests.get(FEAR_GREED_BASE, params={"limit": 1}, timeout=30)
+    resp.raise_for_status()
+    entries = resp.json().get("data", [])
+    if not entries:
+        raise FetchError("No Crypto Fear & Greed data")
+    entry = entries[0]
+    ts = entry.get("timestamp")
+    observed = (
+        datetime.fromtimestamp(int(ts), timezone.utc).strftime("%Y-%m-%d")
+        if ts else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    )
+    return float(entry["value"]), observed
+
+
 def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
     source = settings["source"]
     if source == "yahoo":
@@ -111,4 +127,6 @@ def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
         return _fred_cpi_yoy(settings["series"])
     if source == "coingecko":
         return _coingecko_latest(settings["coin_id"])
+    if source == "fear_greed":
+        return _fear_greed_latest()
     raise FetchError(f"Unknown source: {source}")
