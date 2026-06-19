@@ -18,6 +18,7 @@ from src.db import (
     record_post,
 )
 from src.posting.compose import compose_multi_tweet, compose_single_tweet
+from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
 from src.posting.grouping import filter_stale_alerts
 from src.posting.models import AlertTrigger
@@ -239,9 +240,23 @@ def process_posting_queue(
             continue
 
         if decision.tweet_type == "multi":
-            text = compose_multi_tweet(decision.alerts, decision.theme)
+            histories = {a.indicator: build_move_history(conn, a) for a in decision.alerts}
+            text = compose_multi_tweet(
+                decision.alerts,
+                decision.theme,
+                histories=histories,
+                posting_cfg=posting_cfg,
+                is_emergency=decision.is_emergency,
+            )
         else:
-            text = compose_single_tweet(decision.alerts[0])
+            alert = decision.alerts[0]
+            history = build_move_history(conn, alert)
+            text = compose_single_tweet(
+                alert,
+                history=history,
+                posting_cfg=posting_cfg,
+                is_emergency=decision.is_emergency,
+            )
 
         print(f"[posting] {decision.tweet_type} score={decision.score} emergency={decision.is_emergency}")
         post_tweet(text)
