@@ -27,9 +27,20 @@ def _normalize_rules(ind: dict[str, Any]) -> list[dict[str, Any]]:
     return rules
 
 
+def _source_quality_defaults(source: str) -> dict[str, Any]:
+    if source in ("coingecko", "fear_greed"):
+        return {"schedule": "crypto_24_7", "max_stale_hours": 12}
+    if source == "yahoo":
+        return {"schedule": "us_equity", "max_stale_hours": 48}
+    return {"schedule": "macro", "max_stale_hours": 720}
+
+
 def indicator_settings(cfg: dict[str, Any], key: str) -> dict[str, Any]:
     defaults = {k: v for k, v in cfg.get("defaults", {}).items() if k != "rules"}
     ind = cfg["indicators"][key]
     merged = {**defaults, **ind, "key": key}
     merged["rules"] = _normalize_rules(merged)
+    dq = cfg.get("defaults", {}).get("quality") or {}
+    iq = ind.get("quality") or {}
+    merged["quality"] = {**_source_quality_defaults(merged["source"]), **dq, **iq}
     return merged

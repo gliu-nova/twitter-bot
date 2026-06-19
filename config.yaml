@@ -13,6 +13,9 @@
 
 defaults:
   cooldown_hours: 24
+  # quality.schedule: us_equity | crypto_24_7 | macro (auto-set by source if omitted)
+  # quality.max_stale_hours: reject data older than this
+  # quality.verify: optional second source { source, symbol/series, tolerance_pct }
 
 indicators:
   sp500:
@@ -20,6 +23,11 @@ indicators:
     source: yahoo
     symbol: "^GSPC"
     cooldown_hours: 12
+    quality:
+      verify:
+        source: fred
+        series: SP500
+        tolerance_pct: 0.75
     rules:
       - type: percent_change
         threshold: 3
@@ -29,6 +37,11 @@ indicators:
     source: yahoo
     symbol: "^NDX"
     cooldown_hours: 12
+    quality:
+      verify:
+        source: fred
+        series: NASDAQCOM
+        tolerance_pct: 1.5
     rules:
       - type: percent_change
         threshold: 4
@@ -48,6 +61,11 @@ indicators:
     name: "US Dollar Index (DXY)"
     source: yahoo
     symbol: "DX-Y.NYB"
+    quality:
+      verify:
+        source: fred
+        series: DTWEXBGS
+        tolerance_pct: 2.5
     rules:
       - type: percent_change
         threshold: 2
@@ -56,6 +74,11 @@ indicators:
     name: "Gold"
     source: yahoo
     symbol: "GC=F"
+    quality:
+      verify:
+        source: fred
+        series: GOLDPMGBD228NLBM
+        tolerance_pct: 2.0
     rules:
       - type: percent_change
         threshold: 3
@@ -101,6 +124,11 @@ indicators:
     source: coingecko
     coin_id: bitcoin
     cooldown_hours: 6
+    quality:
+      verify:
+        source: yahoo
+        symbol: "BTC-USD"
+        tolerance_pct: 1.5
     rules:
       - type: percent_change
         threshold: 8
@@ -110,6 +138,11 @@ indicators:
     source: coingecko
     coin_id: ethereum
     cooldown_hours: 6
+    quality:
+      verify:
+        source: yahoo
+        symbol: "ETH-USD"
+        tolerance_pct: 1.5
     rules:
       - type: percent_change
         threshold: 10
@@ -119,6 +152,11 @@ indicators:
     source: coingecko
     coin_id: solana
     cooldown_hours: 6
+    quality:
+      verify:
+        source: yahoo
+        symbol: "SOL-USD"
+        tolerance_pct: 2.0
     rules:
       - type: percent_change
         threshold: 12

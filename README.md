@@ -108,6 +108,28 @@ TWITTER_ACCESS_TOKEN_SECRET=...
 
 Or use `launchd` on macOS for a local always-on scheduler.
 
+## Data quality safeguards
+
+Before saving or tweeting, each reading passes:
+
+- **API health** — pings FRED, Yahoo, CoinGecko, Fear & Greed at run start
+- **Type/NaN check** — rejects null, NaN, or non-numeric values
+- **Staleness** — per-indicator `max_stale_hours` (auto by source: crypto 12h, equities 48h, macro 720h)
+- **Cross-verification** — optional second source must agree within `tolerance_pct` (configured for SP500, NASDAQ, DXY, gold, BTC, ETH, SOL)
+- **Market hours** — `us_equity` indicators suppress **alerts** outside 9:30–16:00 ET Mon–Fri (data still saved)
+
+```bash
+python run.py --health   # API health only
+```
+
+## Hourly schedule (macOS)
+
+```bash
+./scripts/install-schedule.sh   # launchd job every 3600s
+# Logs: data/bot.log
+# Uninstall: launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
+```
+
 ## Run
 
 ```bash

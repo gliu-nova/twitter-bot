@@ -94,7 +94,10 @@ def _coingecko_latest(coin_id: str) -> tuple[float, str]:
         params={"ids": coin_id, "vs_currencies": "usd"},
         timeout=30,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        raise FetchError(f"CoinGecko error: {e}") from e
     data = resp.json()
     if coin_id not in data or "usd" not in data[coin_id]:
         raise FetchError(f"No CoinGecko price for {coin_id}")
