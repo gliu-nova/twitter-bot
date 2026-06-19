@@ -76,7 +76,7 @@ Alerts are **queued and batched**, not tweeted instantly.
 2. **Buffer** market alerts 30 min (configurable) so BTC/ETH/SOL don't become 3 separate tweets
 3. **Macro recap** batch flushes after 4:15 PM ET
 4. **Decide**: standalone tweet if score ≥ 85 (CPI, Fed, VIX>30, yield curve, etc.) OR multi-indicator tweet when 3+ alerts share a theme
-5. **Daily cap**: 2 posts/day (emergencies with score ≥ 90 bypass the cap)
+5. **Daily cap**: max **2 regular posts/day** — emergency/black-swan posts (score ≥ 90 or emergency tier) **do not count** toward the limit
 6. **Cooldown**: same indicator not posted again within 36h unless emergency
 7. **Diversity**: avoids 3 crypto tweets in a row — prefers macro when possible
 

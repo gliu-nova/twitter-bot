@@ -12,7 +12,7 @@ scheduler:
 # Posting engine — scoring, grouping, daily cap, buffers.
 # Threshold rules per indicator are still edited under `indicators:` below.
 posting:
-  daily_post_cap: 2
+  daily_post_cap: 2          # regular posts only; emergencies bypass this cap
   emergency_threshold: 90
   high_single_threshold: 85
   multi_threshold: 120
