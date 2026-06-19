@@ -173,7 +173,7 @@ Do **not** commit `.env` to git.
 3. Select **Twitter Bot** workflow
 4. Click **Run workflow** once to test manually
 
-Scheduled runs start automatically every **5 minutes** via `.github/workflows/bot.yml`.
+Scheduled runs start automatically every **15 minutes** via `.github/workflows/bot.yml`.
 
 #### Step 3 — Verify
 
@@ -187,7 +187,7 @@ SQLite (`data/indicators.db`) is cached between runs so readings, cooldowns, and
 
 #### Private repo note
 
-GitHub Free private repos include **2,000 Actions minutes/month**. At ~5 min intervals (~8,600 runs/month), you may exceed this on a private repo. Options:
+GitHub Free private repos include **2,000 Actions minutes/month**. At 15-min intervals (~2,900 runs/month), a private repo may still be tight depending on run duration. Options:
 
 - Make the repo **public** (Actions free for public repos)
 - Upgrade GitHub plan for more minutes
@@ -219,7 +219,7 @@ python run.py --health   # API health only
 
 ## Polling schedule
 
-The bot **ticks every 5 minutes** but each indicator fetches on its own tier (posting rules unchanged — still max 2 tweets/day + buffer):
+GitHub Actions **ticks every 15 minutes**; each indicator fetches on its own tier when due (posting rules unchanged — still max 2 regular tweets/day + buffer):
 
 | Tier | Indicators | Poll interval |
 |------|------------|---------------|

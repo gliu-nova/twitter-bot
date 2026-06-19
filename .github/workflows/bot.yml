@@ -2,8 +2,8 @@ name: Twitter Bot
 
 on:
   schedule:
-    # Every 5 minutes (GitHub minimum). Matches scheduler.tick_minutes in config.yaml.
-    - cron: "*/5 * * * *"
+    # Every 15 minutes. Per-indicator poll tiers in config.yaml still apply.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 # Prevent overlapping runs if a fetch takes longer than 5 minutes.
