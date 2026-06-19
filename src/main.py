@@ -18,6 +18,8 @@ def _source_for_health(source: str) -> str:
         return "fred"
     if source == "yahoo":
         return "yahoo"
+    if source in ("binance", "kraken"):
+        return source
     if source == "coingecko":
         return "coingecko"
     if source == "fear_greed":
@@ -42,10 +44,7 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
     health = check_api_health()
     print("API health:", ", ".join(f"{k}={v}" for k, v in health.items()))
     if health_only:
-        ok = all(
-            v == "ok" or (k == "coingecko" and "rate_limited" in v)
-            for k, v in health.items()
-        )
+        ok = all(v == "ok" for k, v in health.items())
         return 0 if ok else 1
 
     conn = connect()
@@ -69,15 +68,7 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
             continue
 
         health_msg = health.get(src_health, "")
-        api_ok = health_msg == "ok" or (
-            src_health == "coingecko" and "rate_limited" in health_msg
-        )
-        if not api_ok and settings["source"] == "coingecko" and last_reading(conn, key):
-            row = last_reading(conn, key)
-            value, observed_at = float(row["value"]), row["observed_at"]
-            print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [cached, API: {health.get(src_health)}]")
-            continue
-
+        api_ok = health_msg == "ok"
         if not api_ok:
             print(f"[{key}] skipped: API unhealthy ({src_health})", file=sys.stderr)
             errors += 1
@@ -86,11 +77,6 @@ def run(only: str | None = None, *, health_only: bool = False) -> int:
         try:
             value, observed_at = fetch_indicator(settings)
         except FetchError as e:
-            if settings["source"] == "coingecko" and last_reading(conn, key):
-                row = last_reading(conn, key)
-                value, observed_at = float(row["value"]), row["observed_at"]
-                print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [cached after fetch error]")
-                continue
             print(f"[{key}] fetch failed: {e}", file=sys.stderr)
             errors += 1
             continue

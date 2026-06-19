@@ -9,6 +9,8 @@ import yfinance as yf
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3/simple/price"
+BINANCE_BASE = "https://api.binance.com/api/v3/ticker/price"
+KRAKEN_BASE = "https://api.kraken.com/0/public/Ticker"
 FEAR_GREED_BASE = "https://api.alternative.me/fng/"
 
 
@@ -35,8 +37,14 @@ def _fred_latest(series_id: str) -> tuple[float, str]:
         },
         timeout=30,
     )
-    resp.raise_for_status()
-    observations = resp.json().get("observations", [])
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        raise FetchError(f"FRED error for {series_id}: {e}") from e
+    body = resp.json()
+    if body.get("error_code"):
+        raise FetchError(f"FRED error for {series_id}: {body.get('error_message', body)}")
+    observations = body.get("observations", [])
     for obs in observations:
         raw = obs.get("value")
         if raw in (None, ".", ""):
@@ -105,6 +113,33 @@ def _coingecko_latest(coin_id: str) -> tuple[float, str]:
     return float(data[coin_id]["usd"]), today
 
 
+def _kraken_latest(pair: str) -> tuple[float, str]:
+    resp = requests.get(KRAKEN_BASE, params={"pair": pair}, timeout=15)
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        raise FetchError(f"Kraken error: {e}") from e
+    result = resp.json().get("result")
+    if not result:
+        raise FetchError(f"No Kraken data for {pair}")
+    ticker = next(iter(result.values()))
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return float(ticker["c"][0]), now
+
+
+def _binance_latest(symbol: str) -> tuple[float, str]:
+    resp = requests.get(BINANCE_BASE, params={"symbol": symbol}, timeout=15)
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        raise FetchError(f"Binance error: {e}") from e
+    data = resp.json()
+    if "price" not in data:
+        raise FetchError(f"No Binance price for {symbol}")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return float(data["price"]), now
+
+
 def _fear_greed_latest() -> tuple[float, str]:
     resp = requests.get(FEAR_GREED_BASE, params={"limit": 1}, timeout=30)
     resp.raise_for_status()
@@ -132,4 +167,8 @@ def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
         return _coingecko_latest(settings["coin_id"])
     if source == "fear_greed":
         return _fear_greed_latest()
+    if source == "binance":
+        return _binance_latest(settings["symbol"])
+    if source == "kraken":
+        return _kraken_latest(settings["pair"])
     raise FetchError(f"Unknown source: {source}")

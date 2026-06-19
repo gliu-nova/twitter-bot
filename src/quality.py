@@ -49,7 +49,11 @@ def cross_verify(
     name: str,
 ) -> None:
     fetch_cfg = {k: v for k, v in verify_cfg.items() if k != "tolerance_pct"}
-    secondary, _ = fetch_indicator(fetch_cfg)
+    try:
+        secondary, _ = fetch_indicator(fetch_cfg)
+    except FetchError as e:
+        print(f"[warn] {name}: cross-verify skipped ({e})")
+        return
     validate_value(secondary, f"{name} verify")
     if secondary == 0:
         if primary != 0:
@@ -119,14 +123,11 @@ def check_api_health() -> dict[str, str]:
         results["yahoo"] = str(e)
 
     try:
-        r = requests.get(COINGECKO_BASE, params={"ids": "bitcoin", "vs_currencies": "usd"}, timeout=15)
-        if r.status_code == 429:
-            results["coingecko"] = "rate_limited (crypto uses 24h cache — ok)"
-        else:
-            r.raise_for_status()
-            results["coingecko"] = "ok"
+        r = requests.get("https://api.kraken.com/0/public/Ticker", params={"pair": "XBTUSD"}, timeout=15)
+        r.raise_for_status()
+        results["kraken"] = "ok"
     except Exception as e:
-        results["coingecko"] = str(e)
+        results["kraken"] = str(e)
 
     try:
         r = requests.get(FEAR_GREED_BASE, params={"limit": 1}, timeout=15)

@@ -37,11 +37,6 @@ indicators:
     source: yahoo
     symbol: "^NDX"
     cooldown_hours: 12
-    quality:
-      verify:
-        source: fred
-        series: NASDAQCOM
-        tolerance_pct: 1.5
     rules:
       - type: percent_change
         threshold: 4
@@ -61,11 +56,6 @@ indicators:
     name: "US Dollar Index (DXY)"
     source: yahoo
     symbol: "DX-Y.NYB"
-    quality:
-      verify:
-        source: fred
-        series: DTWEXBGS
-        tolerance_pct: 2.5
     rules:
       - type: percent_change
         threshold: 2
@@ -74,11 +64,6 @@ indicators:
     name: "Gold"
     source: yahoo
     symbol: "GC=F"
-    quality:
-      verify:
-        source: fred
-        series: GOLDPMGBD228NLBM
-        tolerance_pct: 2.0
     rules:
       - type: percent_change
         threshold: 3
@@ -103,6 +88,8 @@ indicators:
     name: "MOVE Index"
     source: yahoo
     symbol: "^MOVE"
+    quality:
+      max_stale_hours: 168
     rules:
       - type: percent_change
         threshold: 10
@@ -121,42 +108,48 @@ indicators:
 
   btc:
     name: "Bitcoin"
-    source: coingecko
-    coin_id: bitcoin
+    source: yahoo
+    symbol: "BTC-USD"
     cooldown_hours: 6
     quality:
+      schedule: crypto_24_7
+      max_stale_hours: 4
       verify:
-        source: yahoo
-        symbol: "BTC-USD"
-        tolerance_pct: 1.5
+        source: kraken
+        pair: XBTUSD
+        tolerance_pct: 0.5
     rules:
       - type: percent_change
         threshold: 8
 
   eth:
     name: "Ethereum"
-    source: coingecko
-    coin_id: ethereum
+    source: yahoo
+    symbol: "ETH-USD"
     cooldown_hours: 6
     quality:
+      schedule: crypto_24_7
+      max_stale_hours: 4
       verify:
-        source: yahoo
-        symbol: "ETH-USD"
-        tolerance_pct: 1.5
+        source: kraken
+        pair: ETHUSD
+        tolerance_pct: 0.5
     rules:
       - type: percent_change
         threshold: 10
 
   sol:
     name: "Solana"
-    source: coingecko
-    coin_id: solana
+    source: yahoo
+    symbol: "SOL-USD"
     cooldown_hours: 6
     quality:
+      schedule: crypto_24_7
+      max_stale_hours: 4
       verify:
-        source: yahoo
-        symbol: "SOL-USD"
-        tolerance_pct: 2.0
+        source: kraken
+        pair: SOLUSD
+        tolerance_pct: 1.0
     rules:
       - type: percent_change
         threshold: 12

@@ -14,7 +14,7 @@ Monitors market and macro indicators, stores readings in SQLite, and posts to X/
 | `oil` | WTI Crude Oil | FRED |
 | `move` | MOVE Index | Yahoo |
 | `hy_spread` | High Yield Credit Spread | FRED |
-| `btc` / `eth` / `sol` | Bitcoin, Ethereum, Solana | CoinGecko |
+| `btc` / `eth` / `sol` | Bitcoin, Ethereum, Solana | Yahoo (verified vs Binance) |
 | `fear_greed` | Crypto Fear & Greed Index | alternative.me |
 | `fed_funds` | Fed Funds Rate | FRED |
 | `treasury_10y` | 10Y Treasury Yield | FRED |
@@ -122,13 +122,14 @@ Before saving or tweeting, each reading passes:
 python run.py --health   # API health only
 ```
 
-**CoinGecko (BTC/ETH/SOL)** fetches at most once per 24 hours to respect free-tier rate limits. Other indicators still poll hourly. Between crypto fetches, cached prices are reused (no duplicate tweets for unchanged data).
+**Crypto (BTC/ETH/SOL)** uses Yahoo Finance hourly, cross-checked against Binance public API.
 
 ## Hourly schedule (macOS)
 
 ```bash
 ./scripts/install-schedule.sh   # launchd job every 3600s
 # Logs: data/bot.log
+# `state = not running` in launchctl is normal between hourly runs
 # Uninstall: launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
 ```
 

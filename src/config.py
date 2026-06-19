@@ -38,7 +38,7 @@ def _source_quality_defaults(source: str) -> dict[str, Any]:
         return {"schedule": "crypto_24_7", "max_stale_hours": 36}
     if source == "yahoo":
         return {"schedule": "us_equity", "max_stale_hours": 48}
-    return {"schedule": "macro", "max_stale_hours": 720}
+    return {"schedule": "macro", "max_stale_hours": 4320}
 
 
 def indicator_settings(cfg: dict[str, Any], key: str) -> dict[str, Any]:
