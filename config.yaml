@@ -1,0 +1,108 @@
+# Global defaults — override per indicator below
+defaults:
+  # Alert when value moves this % vs last stored reading (example: 50 = ±50%)
+  threshold_percent: 50
+  # Optional absolute bounds (set null to disable)
+  threshold_low: null
+  threshold_high: null
+  # Hours before the same indicator can alert again
+  cooldown_hours: 24
+
+indicators:
+  sp500:
+    name: "S&P 500"
+    source: yahoo
+    symbol: "^GSPC"
+    threshold_percent: 5
+
+  vix:
+    name: "VIX"
+    source: yahoo
+    symbol: "^VIX"
+    threshold_percent: 20
+
+  oil:
+    name: "WTI Crude Oil"
+    source: fred
+    series: DCOILWTICO
+    threshold_percent: 10
+
+  btc:
+    name: "Bitcoin"
+    source: coingecko
+    coin_id: bitcoin
+    threshold_percent: 10
+
+  eth:
+    name: "Ethereum"
+    source: coingecko
+    coin_id: ethereum
+    threshold_percent: 10
+
+  sol:
+    name: "Solana"
+    source: coingecko
+    coin_id: solana
+    threshold_percent: 15
+
+  fed_funds:
+    name: "Fed Funds Rate"
+    source: fred
+    series: DFF
+    threshold_percent: 10
+
+  treasury_10y:
+    name: "10Y Treasury Yield"
+    source: fred
+    series: DGS10
+    threshold_percent: 15
+
+  jobless_claims:
+    name: "Initial Jobless Claims"
+    source: fred
+    series: ICSA
+    threshold_percent: 15
+
+  pmi_manufacturing:
+    name: "PMI Manufacturing"
+    source: fred
+    series: IPMAN
+    threshold_percent: 5
+
+  unemployment:
+    name: "Unemployment Rate"
+    source: fred
+    series: UNRATE
+    threshold_percent: 10
+
+  mortgage_30y:
+    name: "30Y Mortgage Rate"
+    source: fred
+    series: MORTGAGE30US
+    threshold_percent: 10
+
+  consumer_sentiment:
+    name: "Consumer Sentiment"
+    source: fred
+    series: UMCSENT
+    threshold_percent: 10
+
+  case_shiller:
+    name: "Case-Shiller Home Prices"
+    source: fred
+    series: CSUSHPINSA
+    threshold_percent: 5
+
+  cpi_yoy:
+    name: "CPI Inflation (YoY %)"
+    source: fred_cpi_yoy
+    series: CPIAUCSL
+    threshold_percent: 10
+
+  yield_curve:
+    name: "Yield Curve (10Y - 2Y)"
+    source: fred
+    series: T10Y2Y
+    threshold_percent: 50
+    threshold_low: 0
+    # Alert when spread inverts (crosses below 0) or moves sharply
