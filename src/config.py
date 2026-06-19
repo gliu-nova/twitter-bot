@@ -15,9 +15,13 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
 
 
 def _normalize_rules(ind: dict[str, Any]) -> list[dict[str, Any]]:
-    if ind.get("rules"):
-        return ind["rules"]
-    rules: list[dict[str, Any]] = []
+    rules: list[dict[str, Any]] = list(ind.get("rules") or [])
+
+    if ind.get("normal_alert") is not None:
+        unit = ind.get("alert_unit", "percent")
+        rtype = "absolute_change" if unit == "absolute" else "percent_change"
+        rules.append({"type": rtype, "threshold": ind["normal_alert"]})
+
     if ind.get("threshold_percent") is not None:
         rules.append({"type": "percent_change", "threshold": ind["threshold_percent"]})
     if ind.get("threshold_low") is not None:

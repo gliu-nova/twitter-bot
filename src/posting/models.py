@@ -19,6 +19,9 @@ class AlertTrigger:
     score: float = 0.0
     db_id: int | None = None
     magnitude_pct: float = 0.0
+    magnitude_abs: float = 0.0
+    alert_unit: str = "percent"
+    alert_tier: str = "normal"  # normal | major | emergency
     standalone_major: bool = False
 
 

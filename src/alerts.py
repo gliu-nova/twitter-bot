@@ -14,11 +14,36 @@ def _pct_change(old: float, new: float) -> float:
     return ((new - old) / abs(old)) * 100
 
 
+def _absolute_change(old: float, new: float) -> float:
+    return new - old
+
+
 def _in_cooldown(last_alert_at: str | None, hours: float) -> bool:
     if not last_alert_at:
         return False
     last = datetime.fromisoformat(last_alert_at)
     return datetime.now(timezone.utc) - last < timedelta(hours=hours)
+
+
+def _detect_tier(settings: dict[str, Any], prev: float | None, value: float) -> str:
+    if prev is None:
+        return "normal"
+
+    unit = settings.get("alert_unit", "percent")
+    if unit == "absolute":
+        move = abs(_absolute_change(prev, value))
+    else:
+        move = abs(_pct_change(prev, value))
+        if move == float("inf"):
+            move = 100.0
+
+    emergency = settings.get("emergency_alert")
+    major = settings.get("major_alert")
+    if emergency is not None and move >= float(emergency):
+        return "emergency"
+    if major is not None and move >= float(major):
+        return "major"
+    return "normal"
 
 
 def _eval_rule(rule: dict[str, Any], prev: float | None, value: float) -> tuple[str | None, str | None]:
@@ -33,6 +58,21 @@ def _eval_rule(rule: dict[str, Any], prev: float | None, value: float) -> tuple[
         if abs(change) >= threshold:
             direction = "up" if change > 0 else "down"
             return f"moved {abs(change):.1f}% {direction} (limit ±{threshold:g}%)", rtype
+        return None, None
+
+    if rtype == "absolute_change":
+        if prev is None:
+            return None, None
+        change = _absolute_change(prev, value)
+        threshold = float(rule["threshold"])
+        if abs(change) >= threshold:
+            direction = "up" if change > 0 else "down"
+            bps = abs(change) * 100
+            if bps >= 1:
+                detail = f"{bps:.0f} bps"
+            else:
+                detail = f"{abs(change):.2f} pp"
+            return f"moved {detail} {direction} (limit ±{threshold:g} pp)", rtype
         return None, None
 
     if rtype == "above":
@@ -106,7 +146,17 @@ def check_alert(
     if not reasons:
         return False, None
 
+    unit = settings.get("alert_unit", "percent")
     magnitude_pct = abs(_pct_change(prev, value)) if prev is not None else 0.0
+    if magnitude_pct == float("inf"):
+        magnitude_pct = 100.0
+    magnitude_abs = abs(_absolute_change(prev, value)) if prev is not None else 0.0
+
+    # Level-cross rules are inherently major events
+    tier = _detect_tier(settings, prev, value)
+    if any(r in ("crosses_above", "crosses_below") for r in rule_types):
+        tier = "major" if tier == "normal" else tier
+
     quality = settings.get("quality") or {}
     is_macro = quality.get("schedule") == "macro"
 
@@ -121,7 +171,10 @@ def check_alert(
         category=str(settings.get("category") or "other"),
         is_macro=is_macro,
         timestamp=datetime.now(timezone.utc),
-        magnitude_pct=magnitude_pct if magnitude_pct != float("inf") else 100.0,
+        magnitude_pct=magnitude_pct,
+        magnitude_abs=magnitude_abs,
+        alert_unit=unit,
+        alert_tier=tier,
         standalone_major=bool(settings.get("standalone_major")),
     )
     return True, alert

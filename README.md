@@ -34,30 +34,37 @@ Monitors market and macro indicators, stores readings in SQLite, and posts to X/
 Edit `config.yaml`. **Each indicator has its own `rules` list** — not one global threshold.
 
 ```yaml
-vix:
-  name: VIX
-  source: yahoo
-  symbol: "^VIX"
-  cooldown_hours: 6
+btc:
+  normal_alert: 5          # triggers at ±5% move
+  major_alert: 8           # tier: major
+  emergency_alert: 12      # tier: emergency (bypasses daily cap)
+
+fed_funds:
+  alert_unit: absolute     # rates use pp/bps, not percent change
+  normal_alert: 0.25
+  major_alert: 0.50
+  emergency_alert: 0.75
+
+cpi_yoy:
+  alert_unit: absolute
+  normal_alert: 0.3
   rules:
-    - type: percent_change
-      threshold: 15          # alert if VIX moves ±15% vs last reading
     - type: crosses_above
-      value: 30              # alert when VIX crosses above 30
+      value: 3.0
+    - type: percent_change
+      threshold: 12
 
 yield_curve:
   rules:
     - type: crosses_below
-      value: 0               # inversion alert
-
-btc:
-  rules:
-    - type: percent_from_baseline
-      baseline: 50000
-      threshold: 50            # ±50% from your chosen baseline
+      value: 0               # normal → inverted
+    - type: crosses_above
+      value: 0               # inverted → normal
 ```
 
-**Rule types:** `percent_change`, `percent_from_baseline`, `above`, `below`, `crosses_above`, `crosses_below`
+**Tier fields:** `normal_alert`, `major_alert`, `emergency_alert` (+ optional `alert_unit: absolute`)
+
+**Rule types:** `percent_change`, `absolute_change`, `crosses_above`, `crosses_below`, `above`, `below`
 
 **`cooldown_hours`** — per indicator; prevents repeat *alerts* for the same metric during fetch cycles.
 

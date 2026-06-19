@@ -22,7 +22,11 @@ def decide_tweet_type(
 
     # Rule 1: Very high single score → standalone tweet
     if top_alert.score >= high_single or top_alert.standalone_major:
-        is_emergency = top_alert.score >= emergency_threshold or top_alert.standalone_major
+        is_emergency = (
+            top_alert.alert_tier == "emergency"
+            or top_alert.score >= emergency_threshold
+            or top_alert.standalone_major
+        )
         return TweetDecision(
             tweet_type="single",
             alerts=[top_alert],
@@ -61,5 +65,5 @@ def decide_tweet_type(
         tweet_type="single",
         alerts=[top_alert],
         score=top_alert.score,
-        is_emergency=top_alert.score >= emergency_threshold,
+        is_emergency=top_alert.alert_tier == "emergency" or top_alert.score >= emergency_threshold,
     )

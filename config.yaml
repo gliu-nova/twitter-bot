@@ -13,12 +13,11 @@ posting:
   max_crypto_streak: 2
   diversity_lookback: 3
   magnitude_cap_pct: 25
-  freshness_default: 90
+  magnitude_cap_absolute: 1.0
   score_weights:
-    magnitude: 0.40
+    magnitude: 0.45
     rarity: 0.30
-    audience: 0.20
-    freshness: 0.10
+    audience: 0.25
 
   indicator_themes:
     btc:
@@ -153,18 +152,16 @@ posting:
       rarity: 55
       audience_relevance: 50
 
-# Per-indicator alert rules — each indicator has its own `rules` list.
-# Any matching rule triggers a tweet (subject to cooldown_hours).
+# Per-indicator alert thresholds.
 #
-# Rule types:
-#   percent_change:     { threshold: 10 }           # ±10% vs last stored reading
-#   percent_from_baseline: { baseline: 100, threshold: 50 }
-#   above:              { value: 30 }              # value currently above level
-#   below:              { value: 0 }               # value currently below level
-#   crosses_above:      { value: 0 }               # was below, now at/above
-#   crosses_below:      { value: 0 }               # was above, now at/below
+# Tier fields (auto-generate a rule from normal_alert):
+#   normal_alert / major_alert / emergency_alert — custom per indicator
+#   alert_unit: percent (default) | absolute (rates, CPI YoY, spreads)
 #
-# First poll stores a baseline; percent/cross rules fire from the second poll onward.
+# Explicit rules (optional, merged with tier rule):
+#   percent_change, absolute_change, crosses_above, crosses_below, above, below
+#
+# First poll stores a baseline; change/cross rules fire from the second poll onward.
 
 defaults:
   cooldown_hours: 24
@@ -178,32 +175,33 @@ indicators:
     source: yahoo
     symbol: "^GSPC"
     cooldown_hours: 12
+    normal_alert: 2
+    major_alert: 3
+    emergency_alert: 5
     quality:
       verify:
         source: fred
         series: SP500
         tolerance_pct: 0.75
-    rules:
-      - type: percent_change
-        threshold: 3
 
   nasdaq100:
     name: "NASDAQ 100"
     source: yahoo
     symbol: "^NDX"
     cooldown_hours: 12
-    rules:
-      - type: percent_change
-        threshold: 4
+    normal_alert: 3
+    major_alert: 4
+    emergency_alert: 6
 
   vix:
     name: "VIX"
     source: yahoo
     symbol: "^VIX"
     cooldown_hours: 6
+    normal_alert: 15
+    major_alert: 25
+    emergency_alert: 35
     rules:
-      - type: percent_change
-        threshold: 15
       - type: crosses_above
         value: 30
 
@@ -211,43 +209,44 @@ indicators:
     name: "US Dollar Index (DXY)"
     source: yahoo
     symbol: "DX-Y.NYB"
-    rules:
-      - type: percent_change
-        threshold: 2
+    normal_alert: 1.5
+    major_alert: 2
+    emergency_alert: 3
 
   gold:
     name: "Gold"
     source: yahoo
     symbol: "GC=F"
-    rules:
-      - type: percent_change
-        threshold: 3
+    normal_alert: 2
+    major_alert: 3
+    emergency_alert: 5
 
   silver:
     name: "Silver"
     source: yahoo
     symbol: "SI=F"
-    rules:
-      - type: percent_change
-        threshold: 5
+    normal_alert: 4
+    major_alert: 6
+    emergency_alert: 9
 
   oil:
     name: "WTI Crude Oil"
     source: fred
     series: DCOILWTICO
-    rules:
-      - type: percent_change
-        threshold: 8
+    normal_alert: 6
+    major_alert: 8
+    emergency_alert: 12
 
   move:
     name: "MOVE Index"
     source: yahoo
     symbol: "^MOVE"
+    normal_alert: 8
+    major_alert: 12
+    emergency_alert: 18
     quality:
       max_stale_hours: 168
     rules:
-      - type: percent_change
-        threshold: 10
       - type: crosses_above
         value: 120
 
@@ -255,9 +254,11 @@ indicators:
     name: "High Yield Credit Spread"
     source: fred
     series: BAMLH0A0HYM2
+    alert_unit: absolute
+    normal_alert: 0.20
+    major_alert: 0.35
+    emergency_alert: 0.50
     rules:
-      - type: percent_change
-        threshold: 10
       - type: crosses_above
         value: 5
 
@@ -266,6 +267,9 @@ indicators:
     source: yahoo
     symbol: "BTC-USD"
     cooldown_hours: 6
+    normal_alert: 5
+    major_alert: 8
+    emergency_alert: 12
     quality:
       schedule: crypto_24_7
       max_stale_hours: 4
@@ -273,15 +277,15 @@ indicators:
         source: kraken
         pair: XBTUSD
         tolerance_pct: 0.5
-    rules:
-      - type: percent_change
-        threshold: 8
 
   eth:
     name: "Ethereum"
     source: yahoo
     symbol: "ETH-USD"
     cooldown_hours: 6
+    normal_alert: 6
+    major_alert: 10
+    emergency_alert: 14
     quality:
       schedule: crypto_24_7
       max_stale_hours: 4
@@ -289,15 +293,15 @@ indicators:
         source: kraken
         pair: ETHUSD
         tolerance_pct: 0.5
-    rules:
-      - type: percent_change
-        threshold: 10
 
   sol:
     name: "Solana"
     source: yahoo
     symbol: "SOL-USD"
     cooldown_hours: 6
+    normal_alert: 8
+    major_alert: 12
+    emergency_alert: 18
     quality:
       schedule: crypto_24_7
       max_stale_hours: 4
@@ -305,9 +309,6 @@ indicators:
         source: kraken
         pair: SOLUSD
         tolerance_pct: 1.0
-    rules:
-      - type: percent_change
-        threshold: 12
 
   fear_greed:
     name: "Crypto Fear & Greed Index"
@@ -324,17 +325,20 @@ indicators:
     source: fred
     series: DFF
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 5
+    alert_unit: absolute
+    normal_alert: 0.25
+    major_alert: 0.50
+    emergency_alert: 0.75
 
   treasury_10y:
     name: "10Y Treasury Yield"
     source: fred
     series: DGS10
+    alert_unit: absolute
+    normal_alert: 0.10
+    major_alert: 0.15
+    emergency_alert: 0.25
     rules:
-      - type: percent_change
-        threshold: 10
       - type: crosses_above
         value: 4.5
 
@@ -342,8 +346,14 @@ indicators:
     name: "Yield Curve (10Y - 2Y)"
     source: fred
     series: T10Y2Y
+    alert_unit: absolute
+    normal_alert: 0.15
+    major_alert: 0.25
+    emergency_alert: 0.40
     rules:
       - type: crosses_below
+        value: 0
+      - type: crosses_above
         value: 0
 
   jobless_claims:
@@ -351,27 +361,28 @@ indicators:
     source: fred
     series: ICSA
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 10
+    normal_alert: 8
+    major_alert: 12
+    emergency_alert: 18
 
   pmi_manufacturing:
     name: "PMI Manufacturing (Industrial Production)"
     source: fred
     series: IPMAN
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 2
+    normal_alert: 1.5
+    major_alert: 2
+    emergency_alert: 3
 
   ism_services:
     name: "ISM Services PMI proxy (Chicago Fed Nonmfg)"
     source: fred
     series: CFSBCACTIVITYNMFG
     cooldown_hours: 168
+    normal_alert: 10
+    major_alert: 15
+    emergency_alert: 22
     rules:
-      - type: percent_change
-        threshold: 15
       - type: crosses_below
         value: 0
 
@@ -380,51 +391,62 @@ indicators:
     source: fred
     series: UNRATE
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 5
+    alert_unit: absolute
+    normal_alert: 0.10
+    major_alert: 0.20
+    emergency_alert: 0.30
 
   mortgage_30y:
     name: "30Y Mortgage Rate"
     source: fred
     series: MORTGAGE30US
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 5
+    alert_unit: absolute
+    normal_alert: 0.15
+    major_alert: 0.25
+    emergency_alert: 0.35
 
   consumer_sentiment:
     name: "Consumer Sentiment"
     source: fred
     series: UMCSENT
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 5
+    alert_unit: absolute
+    normal_alert: 3
+    major_alert: 5
+    emergency_alert: 8
 
   case_shiller:
     name: "Case-Shiller Home Prices"
     source: fred
     series: CSUSHPINSA
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 2
+    normal_alert: 1.5
+    major_alert: 2
+    emergency_alert: 3
 
   cpi_yoy:
     name: "CPI Inflation (YoY %)"
     source: fred_cpi_yoy
     series: CPIAUCSL
     cooldown_hours: 168
+    alert_unit: absolute
+    normal_alert: 0.3
+    major_alert: 0.4
+    emergency_alert: 0.5
     rules:
+      - type: crosses_above
+        value: 3.0
+      - type: crosses_below
+        value: 3.0
       - type: percent_change
-        threshold: 5
+        threshold: 12
 
   m2:
     name: "M2 Money Supply"
     source: fred
     series: M2SL
     cooldown_hours: 168
-    rules:
-      - type: percent_change
-        threshold: 1
+    normal_alert: 0.5
+    major_alert: 1
+    emergency_alert: 1.5

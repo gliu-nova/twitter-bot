@@ -144,7 +144,11 @@ def enqueue_alert(
 ) -> int:
     settings = indicator_settings(cfg, alert.indicator)
     posting_cfg = cfg.get("posting") or {}
-    alert.score = calculate_score(alert, settings, posting_cfg)
+    score = calculate_score(alert, settings, posting_cfg)
+    if score is None:
+        print(f"[queue] {alert.indicator} rejected: stale alert")
+        return 0
+    alert.score = score
 
     alert_id = insert_pending_alert(
         conn,
@@ -160,7 +164,10 @@ def enqueue_alert(
         triggered_at=alert.timestamp.isoformat(),
     )
     alert.db_id = alert_id
-    print(f"[queue] {alert.indicator} score={alert.score} themes={','.join(alert.themes)}")
+    print(
+        f"[queue] {alert.indicator} tier={alert.alert_tier} score={alert.score} "
+        f"themes={','.join(alert.themes)}"
+    )
     return alert_id
 
 
