@@ -2,11 +2,11 @@ name: Twitter Bot
 
 on:
   schedule:
-    # Every 15 minutes. Per-indicator poll tiers in config.yaml still apply.
-    - cron: "*/15 * * * *"
+    # Every hour. Per-indicator poll tiers in config.yaml still apply.
+    - cron: "0 * * * *"
   workflow_dispatch:
 
-# Prevent overlapping runs if a fetch takes longer than 15 minutes.
+# Prevent overlapping runs if a fetch takes longer than one hour.
 concurrency:
   group: twitter-bot
   cancel-in-progress: false
@@ -43,6 +43,9 @@ jobs:
           TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
           TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
           TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
+          # Scheduled runs: secrets + data APIs only (no get_me). Manual runs: full Twitter check.
+          CHECK_TWITTER: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          TWITTER_VALIDATE_MIN_HOURS: ${{ github.event_name == 'workflow_dispatch' && '0' || '24' }}
         run: python run.py --validate
 
       - name: Run bot
