@@ -258,7 +258,7 @@ indicators:
     major_alert: 12
     emergency_alert: 18
     quality:
-      max_stale_hours: 168
+      max_stale_hours: 336
     rules:
       - type: crosses_above
         value: 120

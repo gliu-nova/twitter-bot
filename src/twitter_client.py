@@ -34,5 +34,9 @@ def post_tweet(text: str, *, media_path: str | Path | None = None) -> None:
             uploaded = api.media_upload(filename=str(path))
             media_ids = [uploaded.media_id]
 
-    client.create_tweet(text=text[:280], media_ids=media_ids)
+    try:
+        client.create_tweet(text=text[:280], media_ids=media_ids)
+    except tweepy.TweepyException as e:
+        print(f"Tweet failed: {e}", file=__import__("sys").stderr)
+        raise
     print("Tweet posted." + (f" (media: {media_path})" if media_path else ""))

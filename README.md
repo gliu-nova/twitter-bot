@@ -243,9 +243,27 @@ launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot   # uninstall
 ## Run
 
 ```bash
+python run.py --validate         # smoke test: secrets, APIs, Twitter auth
 python run.py                    # all indicators
 python run.py --indicator vix    # one indicator
 ```
+
+## Troubleshooting
+
+### GitHub Actions exit code 1
+
+Older runs failed if **any single indicator** errored (e.g. stale MOVE data). Runs now exit 0 for partial failures; check logs for `Warning: N indicator error(s)`.
+
+### No tweets on X
+
+1. Run `python run.py --validate` — must show `OK: Twitter credentials valid (@yourhandle)`
+2. If `401 Unauthorized` → regenerate **Access Token & Secret** in the [X Developer Portal](https://developer.x.com/) (app must have **Read and write** permissions)
+3. Update GitHub secrets with the new values
+4. **Zero tweets is normal** on quiet days — thresholds must fire first (bot needs 2+ readings before % rules apply)
+
+### Validate in CI
+
+Every GitHub Actions run calls `python run.py --validate` first. If this step fails, secrets are missing or Twitter auth is broken — fix before expecting live posts.
 
 ## Notes
 

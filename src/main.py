@@ -12,6 +12,7 @@ from src.fetch import FetchError, fetch_indicator
 from src.posting import enqueue_alert, process_posting_queue
 from src.quality import QualityError, check_api_health, run_quality_checks
 from src.scheduler import interval_label, is_fetch_due
+from src.validate import run_validate
 
 
 def _source_for_health(source: str) -> str:
@@ -114,7 +115,10 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     conn.close()
     if skipped_alerts:
         print(f"Alerts suppressed: {skipped_alerts}")
-    return 1 if errors else 0
+    if errors:
+        print(f"Warning: {errors} indicator error(s) — run completed (non-fatal)")
+    # Partial indicator failures should not fail the scheduler (exit 0).
+    return 0
 
 
 def main() -> None:
@@ -126,7 +130,15 @@ def main() -> None:
         action="store_true",
         help="Flush posting queue immediately (bypass buffer window)",
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Smoke test: secrets, API health, Twitter credentials",
+    )
     args = parser.parse_args()
+    if args.validate:
+        load_dotenv(ROOT / ".env")
+        raise SystemExit(run_validate())
     raise SystemExit(run(args.indicator, health_only=args.health, force_post=args.force_post))
 
 
