@@ -257,9 +257,10 @@ Older runs failed if **any single indicator** errored (e.g. stale MOVE data). Ru
 ### No tweets on X
 
 1. Run `python run.py --validate` — must show `OK: Twitter credentials valid (@yourhandle)`
-2. If `401 Unauthorized` → regenerate **Access Token & Secret** in the [X Developer Portal](https://developer.x.com/) (app must have **Read and write** permissions)
-3. Update GitHub secrets with the new values
-4. **Zero tweets is normal** on quiet days — thresholds must fire first (bot needs 2+ readings before % rules apply)
+2. Run `python run.py --test-post` (with `DRY_RUN=0`) — confirms posting works end-to-end
+3. If `401 Unauthorized` → regenerate **Access Token & Secret** (app needs **Read and write**)
+4. If `402 Payment Required` → your X API plan has **no post credits**. Add credits or upgrade at [developer.x.com](https://developer.x.com/) — auth can work while posting is blocked
+5. **Zero tweets is normal** on quiet days — thresholds must fire first (bot needs 2+ readings before % rules apply)
 
 ### Validate in CI
 

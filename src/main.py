@@ -135,10 +135,24 @@ def main() -> None:
         action="store_true",
         help="Smoke test: secrets, API health, Twitter credentials",
     )
+    parser.add_argument(
+        "--test-post",
+        action="store_true",
+        help="Post one test tweet to verify live posting (uses DRY_RUN from .env)",
+    )
     args = parser.parse_args()
     if args.validate:
         load_dotenv(ROOT / ".env")
         raise SystemExit(run_validate())
+    if args.test_post:
+        load_dotenv(ROOT / ".env")
+        from datetime import datetime, timezone
+
+        from src.twitter_client import post_tweet
+
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        post_tweet(f"Market bot connectivity test — automated posting check ({ts})."[:280])
+        raise SystemExit(0)
     raise SystemExit(run(args.indicator, health_only=args.health, force_post=args.force_post))
 
 
