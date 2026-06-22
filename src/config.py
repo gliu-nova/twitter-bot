@@ -40,6 +40,15 @@ def _source_fetch_defaults(source: str) -> dict[str, Any]:
 def _source_quality_defaults(source: str) -> dict[str, Any]:
     if source in ("coingecko", "fear_greed"):
         return {"schedule": "crypto_24_7", "max_stale_hours": 36}
+    if source in (
+        "okx_funding",
+        "hyperliquid_funding",
+        "okx_basis",
+        "hyperliquid_basis",
+        "exchange_spread",
+        "okx_liquidations",
+    ):
+        return {"schedule": "crypto_24_7", "max_stale_hours": 2}
     if source == "yahoo":
         return {"schedule": "us_equity", "max_stale_hours": 48}
     return {"schedule": "macro", "max_stale_hours": 4320}

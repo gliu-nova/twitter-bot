@@ -46,6 +46,68 @@ posting:
       category: crypto
       rarity: 60
       audience_relevance: 70
+    btc_funding:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 75
+      audience_relevance: 80
+    eth_funding:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 70
+      audience_relevance: 75
+    sol_funding:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 65
+      audience_relevance: 70
+    btc_basis:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 70
+      audience_relevance: 75
+    eth_basis:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 65
+      audience_relevance: 70
+    sol_basis:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 60
+      audience_relevance: 65
+    btc_exchange_spread:
+      themes: [crypto]
+      category: crypto
+      rarity: 80
+      audience_relevance: 75
+    eth_exchange_spread:
+      themes: [crypto]
+      category: crypto
+      rarity: 75
+      audience_relevance: 70
+    sol_exchange_spread:
+      themes: [crypto]
+      category: crypto
+      rarity: 70
+      audience_relevance: 65
+    btc_liquidations:
+      themes: [crypto, risk_off]
+      category: crypto
+      rarity: 85
+      audience_relevance: 85
+      standalone_major: true
+    eth_liquidations:
+      themes: [crypto, risk_off]
+      category: crypto
+      rarity: 80
+      audience_relevance: 80
+      standalone_major: true
+    sol_liquidations:
+      themes: [crypto, risk_off]
+      category: crypto
+      rarity: 75
+      audience_relevance: 75
     fear_greed:
       themes: [risk_on, crypto]
       category: crypto
@@ -332,6 +394,216 @@ indicators:
         value: 25
       - type: crosses_above
         value: 75
+
+  btc_funding:
+    name: "BTC Perp Funding Rate"
+    source: okx_funding
+    asset: BTC
+    alert_unit: absolute
+    cooldown_hours: 4
+    normal_alert: 0.000025
+    major_alert: 0.00005
+    emergency_alert: 0.0001
+    rules:
+      - type: above
+        value: 0.00008
+      - type: below
+        value: -0.00002
+    quality:
+      verify:
+        source: hyperliquid_funding
+        asset: BTC
+        tolerance_absolute: 0.00008
+
+  eth_funding:
+    name: "ETH Perp Funding Rate"
+    source: okx_funding
+    asset: ETH
+    alert_unit: absolute
+    cooldown_hours: 4
+    normal_alert: 0.00003
+    major_alert: 0.00006
+    emergency_alert: 0.00012
+    rules:
+      - type: above
+        value: 0.0001
+      - type: below
+        value: -0.00003
+    quality:
+      verify:
+        source: hyperliquid_funding
+        asset: ETH
+        tolerance_absolute: 0.0001
+
+  sol_funding:
+    name: "SOL Perp Funding Rate"
+    source: okx_funding
+    asset: SOL
+    alert_unit: absolute
+    cooldown_hours: 4
+    normal_alert: 0.00004
+    major_alert: 0.00008
+    emergency_alert: 0.00015
+    rules:
+      - type: above
+        value: 0.00012
+      - type: below
+        value: -0.00004
+    quality:
+      verify:
+        source: hyperliquid_funding
+        asset: SOL
+        tolerance_absolute: 0.00012
+
+  btc_basis:
+    name: "BTC Perp Basis"
+    source: okx_basis
+    asset: BTC
+    alert_unit: absolute
+    cooldown_hours: 4
+    normal_alert: 8
+    major_alert: 15
+    emergency_alert: 30
+    rules:
+      - type: crosses_above
+        value: 20
+      - type: crosses_below
+        value: -20
+    quality:
+      verify:
+        source: hyperliquid_basis
+        asset: BTC
+        tolerance_absolute: 5
+
+  eth_basis:
+    name: "ETH Perp Basis"
+    source: okx_basis
+    asset: ETH
+    alert_unit: absolute
+    cooldown_hours: 4
+    normal_alert: 10
+    major_alert: 18
+    emergency_alert: 35
+    rules:
+      - type: crosses_above
+        value: 25
+      - type: crosses_below
+        value: -25
+    quality:
+      verify:
+        source: hyperliquid_basis
+        asset: ETH
+        tolerance_absolute: 5
+
+  sol_basis:
+    name: "SOL Perp Basis"
+    source: okx_basis
+    asset: SOL
+    alert_unit: absolute
+    cooldown_hours: 4
+    normal_alert: 12
+    major_alert: 22
+    emergency_alert: 40
+    rules:
+      - type: crosses_above
+        value: 30
+      - type: crosses_below
+        value: -30
+    quality:
+      verify:
+        source: hyperliquid_basis
+        asset: SOL
+        tolerance_absolute: 6
+
+  btc_exchange_spread:
+    name: "BTC Exchange Spread"
+    source: exchange_spread
+    asset: BTC
+    alert_unit: absolute
+    cooldown_hours: 2
+    normal_alert: 6
+    major_alert: 12
+    emergency_alert: 25
+    rules:
+      - type: above
+        value: 15
+    quality:
+      verify:
+        tolerance_pct: 1.0
+
+  eth_exchange_spread:
+    name: "ETH Exchange Spread"
+    source: exchange_spread
+    asset: ETH
+    alert_unit: absolute
+    cooldown_hours: 2
+    normal_alert: 8
+    major_alert: 15
+    emergency_alert: 30
+    rules:
+      - type: above
+        value: 18
+    quality:
+      verify:
+        tolerance_pct: 1.0
+
+  sol_exchange_spread:
+    name: "SOL Exchange Spread"
+    source: exchange_spread
+    asset: SOL
+    alert_unit: absolute
+    cooldown_hours: 2
+    normal_alert: 10
+    major_alert: 18
+    emergency_alert: 35
+    rules:
+      - type: above
+        value: 22
+    quality:
+      verify:
+        tolerance_pct: 1.5
+
+  btc_liquidations:
+    name: "BTC Liquidations (1h)"
+    source: okx_liquidations
+    asset: BTC
+    liquidation_window_minutes: 60
+    alert_unit: percent
+    cooldown_hours: 3
+    normal_alert: 75
+    major_alert: 150
+    emergency_alert: 300
+    rules:
+      - type: above
+        value: 25000000
+
+  eth_liquidations:
+    name: "ETH Liquidations (1h)"
+    source: okx_liquidations
+    asset: ETH
+    liquidation_window_minutes: 60
+    alert_unit: percent
+    cooldown_hours: 3
+    normal_alert: 75
+    major_alert: 150
+    emergency_alert: 300
+    rules:
+      - type: above
+        value: 15000000
+
+  sol_liquidations:
+    name: "SOL Liquidations (1h)"
+    source: okx_liquidations
+    asset: SOL
+    liquidation_window_minutes: 60
+    alert_unit: percent
+    cooldown_hours: 3
+    normal_alert: 80
+    major_alert: 160
+    emergency_alert: 320
+    rules:
+      - type: above
+        value: 8000000
 
   fed_funds:
     name: "Fed Funds Rate"

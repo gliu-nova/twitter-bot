@@ -46,7 +46,24 @@ STORY_PATTERNS: dict[str, set[str]] = {
 
 # Category groupings for coherence bonus
 CATEGORY_GROUPS: dict[str, set[str]] = {
-    "crypto": {"btc", "eth", "sol", "fear_greed"},
+    "crypto": {
+        "btc",
+        "eth",
+        "sol",
+        "fear_greed",
+        "btc_funding",
+        "eth_funding",
+        "sol_funding",
+        "btc_basis",
+        "eth_basis",
+        "sol_basis",
+        "btc_exchange_spread",
+        "eth_exchange_spread",
+        "sol_exchange_spread",
+        "btc_liquidations",
+        "eth_liquidations",
+        "sol_liquidations",
+    },
     "rates_fx": {"dxy", "treasury_10y", "fed_funds", "yield_curve", "move"},
     "macro_data": {"cpi_yoy", "unemployment", "pmi_manufacturing", "ism_services", "jobless_claims", "consumer_sentiment"},
     "equities_vol": {"sp500", "nasdaq100", "vix", "hy_spread"},

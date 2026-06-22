@@ -49,6 +49,18 @@ SHORT_NAMES: dict[str, str] = {
     "unemployment": "Unemployment",
     "pmi_manufacturing": "Philly Fed",
     "ism_services": "Chi Nonmfg",
+    "btc_funding": "BTC Funding",
+    "eth_funding": "ETH Funding",
+    "sol_funding": "SOL Funding",
+    "btc_basis": "BTC Basis",
+    "eth_basis": "ETH Basis",
+    "sol_basis": "SOL Basis",
+    "btc_exchange_spread": "BTC Spread",
+    "eth_exchange_spread": "ETH Spread",
+    "sol_exchange_spread": "SOL Spread",
+    "btc_liquidations": "BTC Liqs",
+    "eth_liquidations": "ETH Liqs",
+    "sol_liquidations": "SOL Liqs",
 }
 
 THEME_SUBTITLES: dict[str, str] = {

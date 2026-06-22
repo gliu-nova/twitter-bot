@@ -27,13 +27,20 @@ def _parse_observed(observed_at: str) -> datetime:
         return datetime.fromtimestamp(int(observed_at), tz=timezone.utc)
     if "T" in observed_at:
         return datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    if len(observed_at) >= 16 and observed_at[10] == " ":
+        return datetime.strptime(observed_at[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
     return datetime.strptime(observed_at[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
 def check_freshness(observed_at: str, max_stale_hours: float, name: str) -> None:
     observed = _parse_observed(observed_at)
     # Date-only timestamps (no time) — treat as valid through end of that UTC day
-    if len(observed_at.strip()) == 10 and "T" not in observed_at and not observed_at.isdigit():
+    if (
+        len(observed_at.strip()) == 10
+        and "T" not in observed_at
+        and not observed_at.isdigit()
+        and " " not in observed_at
+    ):
         observed = observed.replace(hour=23, minute=59, second=59)
     age_hours = (datetime.now(timezone.utc) - observed).total_seconds() / 3600
     if age_hours > max_stale_hours:
@@ -55,6 +62,15 @@ def cross_verify(
         print(f"[warn] {name}: cross-verify skipped ({e})")
         return
     validate_value(secondary, f"{name} verify")
+    abs_tol = verify_cfg.get("tolerance_absolute")
+    if abs_tol is not None:
+        diff = abs(primary - secondary)
+        if diff > float(abs_tol):
+            raise QualityError(
+                f"{name}: cross-verify failed {primary:g} vs {secondary:g} "
+                f"(|diff| {diff:g} > {float(abs_tol):g})"
+            )
+        return
     if secondary == 0:
         if primary != 0:
             raise QualityError(f"{name}: cross-verify mismatch {primary:g} vs 0")
@@ -90,7 +106,16 @@ def run_quality_checks(
 
     verify = q.get("verify")
     if verify:
-        cross_verify(value, verify, float(verify.get("tolerance_pct", 1.0)), name)
+        if settings.get("source") == "exchange_spread":
+            from src.crypto_metrics import verify_exchange_spread_mid
+
+            verify_exchange_spread_mid(
+                settings,
+                float(verify.get("tolerance_pct", 1.0)),
+                name,
+            )
+        else:
+            cross_verify(value, verify, float(verify.get("tolerance_pct", 1.0)), name)
 
     schedule = q.get("schedule", "macro")
     return check_schedule(schedule, for_alert)
@@ -135,5 +160,37 @@ def check_api_health() -> dict[str, str]:
         results["fear_greed"] = "ok"
     except Exception as e:
         results["fear_greed"] = str(e)
+
+    try:
+        r = requests.get(
+            "https://www.okx.com/api/v5/public/funding-rate",
+            params={"instId": "BTC-USDT-SWAP"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        body = r.json()
+        if body.get("code") != "0":
+            raise RuntimeError(body.get("msg", body))
+        results["okx"] = "ok"
+    except Exception as e:
+        results["okx"] = str(e)
+
+    try:
+        r = requests.post(
+            "https://api.hyperliquid.xyz/info",
+            json={"type": "metaAndAssetCtxs"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        results["hyperliquid"] = "ok"
+    except Exception as e:
+        results["hyperliquid"] = str(e)
+
+    try:
+        r = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=15)
+        r.raise_for_status()
+        results["coinbase"] = "ok"
+    except Exception as e:
+        results["coinbase"] = str(e)
 
     return results

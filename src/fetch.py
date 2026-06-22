@@ -248,4 +248,15 @@ def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
         return _binance_latest(settings["symbol"])
     if source == "kraken":
         return _kraken_latest(settings["pair"])
+    if source in (
+        "okx_funding",
+        "hyperliquid_funding",
+        "okx_basis",
+        "hyperliquid_basis",
+        "exchange_spread",
+        "okx_liquidations",
+    ):
+        from src.crypto_metrics import fetch_crypto_metric
+
+        return fetch_crypto_metric(settings)
     raise FetchError(f"Unknown source: {source}")

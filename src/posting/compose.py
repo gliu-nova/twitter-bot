@@ -43,6 +43,18 @@ CONTEXT_HINTS: dict[str, str] = {
     "fed_funds": "Policy rate shift — liquidity and risk assets repricing.",
     "unemployment": "Labor cooling or heating — Fed reaction function in focus.",
     "jobless_claims": "Early labor signal — soft landing or reacceleration?",
+    "btc_funding": "Elevated funding often signals crowded longs — squeeze risk rises.",
+    "eth_funding": "ETH funding extremes can front-run alt beta and DeFi flows.",
+    "sol_funding": "SOL funding spikes often reflect high-beta positioning unwind risk.",
+    "btc_basis": "Basis blowouts flag perp demand vs spot — arb and basis trades react first.",
+    "eth_basis": "ETH basis dislocations often lead alt perp funding resets.",
+    "sol_basis": "SOL basis stress can signal thin liquidity on high-beta perps.",
+    "btc_exchange_spread": "Wide spot spreads hint at fragmentation or transfer/arbitrage stress.",
+    "eth_exchange_spread": "ETH venue dislocations can precede volatile DeFi/perp resets.",
+    "sol_exchange_spread": "SOL spread blowouts often reflect thin books across venues.",
+    "btc_liquidations": "Liquidation clusters can trigger reflexive moves — watch follow-through.",
+    "eth_liquidations": "ETH liquidation waves often spill into broader alt perp deleveraging.",
+    "sol_liquidations": "SOL liquidation spikes can accelerate high-beta unwind cascades.",
 }
 
 CROSS_CONTEXT: dict[str, dict[str, str]] = {
@@ -84,6 +96,14 @@ def _display_name(alert: AlertTrigger) -> str:
 
 def _format_value(alert: AlertTrigger) -> str:
     v = alert.value
+    if alert.indicator.endswith("_funding"):
+        return f"{v * 100:.4f}%"
+    if alert.indicator.endswith(("_basis", "_exchange_spread")):
+        return f"{v:.1f} bps"
+    if alert.indicator.endswith("_liquidations"):
+        if v >= 1_000_000:
+            return f"${v / 1_000_000:.1f}M"
+        return f"${v:,.0f}"
     if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
         return f"{v:.2f}%"
     if v >= 1000:

@@ -7,7 +7,24 @@ import sqlite3
 from src.db import minutes_since_last_fetch
 from src.market_hours import is_us_equity_session
 
-CRYPTO_KEYS = {"btc", "eth", "sol", "fear_greed"}
+CRYPTO_KEYS = {
+    "btc",
+    "eth",
+    "sol",
+    "fear_greed",
+    "btc_funding",
+    "eth_funding",
+    "sol_funding",
+    "btc_basis",
+    "eth_basis",
+    "sol_basis",
+    "btc_exchange_spread",
+    "eth_exchange_spread",
+    "sol_exchange_spread",
+    "btc_liquidations",
+    "eth_liquidations",
+    "sol_liquidations",
+}
 US_EQUITY_KEYS = {"sp500", "nasdaq100", "vix", "gold", "silver", "dxy", "oil"}
 RATES_FX_KEYS = {"treasury_10y", "yield_curve", "fed_funds", "move", "hy_spread"}
 HOUSING_KEYS = {"case_shiller", "mortgage_30y"}

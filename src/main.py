@@ -26,6 +26,12 @@ def _source_for_health(source: str) -> str:
         return "coingecko"
     if source == "fear_greed":
         return "fear_greed"
+    if source in ("okx_funding", "okx_basis", "okx_liquidations"):
+        return "okx"
+    if source in ("hyperliquid_funding", "hyperliquid_basis"):
+        return "hyperliquid"
+    if source == "exchange_spread":
+        return "kraken"
     return source
 
 
