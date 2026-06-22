@@ -1,10 +1,20 @@
 name: Twitter Bot
 
 on:
+  # Primary: external cron → workflow_dispatch (see scripts/EXTERNAL_CRON.md).
+  # Backup: native schedule (best-effort; may delay hours during GitHub load).
   schedule:
-    # Every hour at :17 past — avoids :00 congestion on GitHub's scheduler.
     - cron: "17 * * * *"
   workflow_dispatch:
+    inputs:
+      source:
+        description: "Trigger source"
+        required: false
+        default: manual
+        type: choice
+        options:
+          - manual
+          - external-cron
 
 # Prevent overlapping runs if a fetch takes longer than one hour.
 concurrency:
@@ -17,6 +27,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Log trigger
+        run: |
+          echo "event=${{ github.event_name }} source=${{ github.event.inputs.source || 'schedule' }}"
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -43,9 +57,9 @@ jobs:
           TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
           TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
           TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
-          # Scheduled runs: secrets + data APIs only (no get_me). Manual runs: full Twitter check.
-          CHECK_TWITTER: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
-          TWITTER_VALIDATE_MIN_HOURS: ${{ github.event_name == 'workflow_dispatch' && '0' || '24' }}
+          # Full Twitter check only on manual dispatch. Scheduled + external-cron skip get_me.
+          CHECK_TWITTER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.source != 'external-cron' && '1' || '0' }}
+          TWITTER_VALIDATE_MIN_HOURS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.source != 'external-cron' && '0' || '24' }}
         run: python run.py --validate
 
       - name: Run bot
