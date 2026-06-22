@@ -573,9 +573,6 @@ indicators:
     normal_alert: 75
     major_alert: 150
     emergency_alert: 300
-    rules:
-      - type: above
-        value: 25000000
 
   eth_liquidations:
     name: "ETH Liquidations (1h)"

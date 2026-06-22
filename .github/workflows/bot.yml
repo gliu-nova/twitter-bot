@@ -4,7 +4,8 @@ on:
   # Primary: external cron → workflow_dispatch (see scripts/EXTERNAL_CRON.md).
   # Backup: native schedule (best-effort; may delay hours during GitHub load).
   schedule:
-    - cron: "17 * * * *"
+    # :31 past each hour UTC — 9:31 AM ET aligns with US cash open (9:30 ET).
+    - cron: "31 * * * *"
   workflow_dispatch:
     inputs:
       source:

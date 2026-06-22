@@ -173,7 +173,7 @@ Do **not** commit `.env` to git.
 3. Select **Twitter Bot** workflow
 4. Click **Run workflow** once to test manually
 
-**Primary:** set up external hourly dispatch — see [`scripts/EXTERNAL_CRON.md`](scripts/EXTERNAL_CRON.md) (cron-job.org → `workflow_dispatch`). **Backup:** native cron every hour at `:17` in `.github/workflows/bot.yml` (may delay during GitHub load).
+**Primary:** set up external hourly dispatch — see [`scripts/EXTERNAL_CRON.md`](scripts/EXTERNAL_CRON.md) (cron-job.org → `workflow_dispatch`). **Backup:** native cron every hour at `:31` in `.github/workflows/bot.yml` (may delay during GitHub load).
 
 #### Step 3 — Verify
 

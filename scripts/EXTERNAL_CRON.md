@@ -2,7 +2,7 @@
 
 GitHub's native `schedule` cron is best-effort and can delay runs by hours. Use an
 external cron service to call `workflow_dispatch` every hour. The workflow still
-keeps `cron: "17 * * * *"` as a backup.
+keeps `cron: "31 * * * *"` as a backup.
 
 ## 1. Create a fine-grained PAT
 
@@ -35,7 +35,7 @@ You should see `Dispatched gliu-nova/twitter-bot workflow 299012131`. Check the
 |-------|-------|
 | Title | Twitter Bot hourly |
 | URL | `https://api.github.com/repos/gliu-nova/twitter-bot/actions/workflows/299012131/dispatches` |
-| Schedule | Every hour at **:17** (matches backup cron) |
+| Schedule | Every hour at **:31** (matches backup cron; 9:31 AM ET ≈ market open) |
 | Request method | **POST** |
 | Request body | `{"ref":"main","inputs":{"source":"external-cron"}}` |
 | Content-Type | `application/json` |
