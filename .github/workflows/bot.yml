@@ -2,8 +2,8 @@ name: Twitter Bot
 
 on:
   schedule:
-    # Every hour. Per-indicator poll tiers in config.yaml still apply.
-    - cron: "0 * * * *"
+    # Every hour at :17 past — avoids :00 congestion on GitHub's scheduler.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 # Prevent overlapping runs if a fetch takes longer than one hour.
