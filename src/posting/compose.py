@@ -56,10 +56,6 @@ TAKEAWAY_HINTS: dict[str, str] = {
     "fear_greed": "Sentiment extreme — trend or contrarian?",
 }
 
-UP_STRONG = ("surged", "spiked", "jumped", "soared")
-UP_MILD = ("climbed", "rose", "gained", "rallied")
-DOWN_STRONG = ("plunged", "crashed", "tumbled", "collapsed")
-DOWN_MILD = ("dropped", "slid", "fell", "pulled back")
 def _assemble_tweet(
     *,
     headline: str,
@@ -141,11 +137,6 @@ def _takeaway_line(alert: AlertTrigger) -> str:
     return "Watch follow-through."
 
 
-def _pick(options: tuple[str, ...], alert: AlertTrigger) -> str:
-    key = sum(ord(c) for c in alert.indicator + str(alert.value))
-    return options[key % len(options)]
-
-
 def _display_name(alert: AlertTrigger) -> str:
     return (
         alert.name.replace("S&P 500", "SPY")
@@ -183,13 +174,6 @@ def _direction_up(alert: AlertTrigger) -> bool:
     if alert.prev_value is None:
         return True
     return alert.value > alert.prev_value
-
-
-def _move_verb(alert: AlertTrigger, *, strong: bool) -> str:
-    up = _direction_up(alert)
-    if strong:
-        return _pick(UP_STRONG if up else DOWN_STRONG, alert)
-    return _pick(UP_MILD if up else DOWN_MILD, alert)
 
 
 def _cross_direction(alert: AlertTrigger) -> str | None:
@@ -394,11 +378,15 @@ def compose_multi_tweet(
     histories = histories or {}
     posting_cfg = posting_cfg or {}
     theme = theme or (alerts[0].themes[0] if alerts[0].themes else "markets")
-    headline = THEME_HEADLINES.get(theme, "Market move")
 
     top = max(alerts, key=lambda x: x.score)
     top_hist = histories.get(top.indicator, MoveHistory())
+    standout = _is_standout(top, top_hist, posting_cfg, is_emergency=is_emergency)
+    major = is_emergency or top.alert_tier == "emergency" or (
+        standout and (top.standalone_major or top.score >= float(posting_cfg.get("high_single_threshold", 85)))
+    )
     emoji = _multi_emoji(alerts, histories, posting_cfg, is_emergency=is_emergency)
+    headline = _headline_for_alert(top, major=major, emoji=emoji)
 
     data_lines: list[str] = []
     for a in sorted(alerts, key=lambda x: x.score, reverse=True)[:4]:
@@ -427,7 +415,7 @@ def compose_multi_tweet(
         "housing": "Housing indicators diverging.",
     }
     return _assemble_tweet(
-        headline=f"{emoji}{headline}".strip(),
+        headline=headline,
         data_lines=data_lines,
         context=_context_line(top, top_hist) or implications.get(theme),
         takeaway="Watch follow-through across the cluster.",
