@@ -127,9 +127,9 @@ def _liquidation_headline(alert: AlertTrigger) -> str:
         if total > 0:
             long_share = long_usd / total
             if long_share >= LIQ_SKEW_THRESHOLD:
-                return f"{asset} LONG SQUEEZE"
+                return f"{asset} LONG FLUSH"
             if long_share <= 1 - LIQ_SKEW_THRESHOLD:
-                return f"{asset} SHORT SQUEEZE"
+                return f"{asset} SHORT FLUSH"
     return f"{asset} LIQUIDATIONS"
 
 
@@ -144,7 +144,7 @@ def _liquidation_skew_context(alert: AlertTrigger) -> str | None:
     if long_share >= LIQ_SKEW_THRESHOLD:
         return "Primarily long liquidations — classic leverage flush."
     if long_share <= 1 - LIQ_SKEW_THRESHOLD:
-        return "Primarily short liquidations — short squeeze dynamics."
+        return "Primarily short liquidations — upside cover flush."
     return None
 
 
