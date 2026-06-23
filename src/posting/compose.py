@@ -291,8 +291,6 @@ def _emoji_for_post(
     if any(r in ("crosses_above", "crosses_below") for r in alert.rule_types):
         if alert.indicator in ("vix", "yield_curve", "cpi_yoy", "fed_funds"):
             return "⚠️ "
-    if standout and alert.standalone_major and alert.alert_tier in ("major", "emergency"):
-        return "🚨 "
     return ""
 
 
