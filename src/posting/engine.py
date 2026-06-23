@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import sqlite3
 
 from src.config import indicator_settings
+from src.market_hours import is_us_equity_session, vix_off_hours_immediate
 from src.db import (
     fetch_pending_alerts,
     hours_since_indicator_post,
@@ -47,6 +48,7 @@ def _row_to_alert(row: sqlite3.Row, cfg: dict[str, Any]) -> AlertTrigger:
         score=float(row["score"]),
         db_id=int(row["id"]),
         standalone_major=bool(settings.get("standalone_major")),
+        alert_tier=str(row["alert_tier"]) if row["alert_tier"] else "normal",
     )
     hydrate_liq_from_reasons(alert)
     return alert
@@ -61,10 +63,20 @@ def _should_flush_market(
     alerts: list[AlertTrigger],
     posting_cfg: dict[str, Any],
     now: datetime | None = None,
+    *,
+    now_et: datetime | None = None,
 ) -> bool:
     if not alerts:
         return False
     now = now or datetime.now(timezone.utc)
+    now_et = now_et or datetime.now(ET)
+
+    if any(vix_off_hours_immediate(a) for a in alerts):
+        return True
+
+    if not is_us_equity_session(now_et):
+        return False
+
     buffer_min = float(posting_cfg.get("market_buffer_minutes", 30))
     oldest = min(a.timestamp for a in alerts)
     age_minutes = (now - oldest).total_seconds() / 60
@@ -195,6 +207,7 @@ def enqueue_alert(
         score=alert.score,
         is_macro=alert.is_macro,
         triggered_at=alert.timestamp.isoformat(),
+        alert_tier=alert.alert_tier,
     )
     alert.db_id = alert_id
     print(
@@ -224,7 +237,9 @@ def process_posting_queue(
 
     batches: list[tuple[str, list[AlertTrigger]]] = []
 
-    if market_alerts and (force or _should_flush_market(market_alerts, posting_cfg, now_utc)):
+    if market_alerts and (
+        force or _should_flush_market(market_alerts, posting_cfg, now_utc, now_et=now_et)
+    ):
         batches.append(("market", market_alerts))
 
     if macro_alerts and (force or _should_flush_macro(now_et)):

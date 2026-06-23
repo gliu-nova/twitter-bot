@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 
 from src.alerts import check_alert
 from src.config import ROOT, indicator_settings, load_config
-from src.db import connect, last_reading, save_reading
+from src.db import connect, has_pending_alert, last_reading, save_reading
+from src.market_hours import off_hours_equity_alert_action
 from src.fetch import FetchError, fetch_indicator
 from src.posting import enqueue_alert, process_posting_queue
 from src.quality import QualityError, check_api_health, run_quality_checks
@@ -109,9 +110,20 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
         try:
             skip = run_quality_checks(settings, value, observed_at, for_alert=True)
             if skip:
-                print(f"[{key}] alert suppressed: {skip}")
-                skipped_alerts += 1
-                continue
+                action = off_hours_equity_alert_action(settings, alert, skip)
+                if action == "drop":
+                    print(f"[{key}] alert suppressed: {skip}")
+                    skipped_alerts += 1
+                    continue
+                if action == "queue":
+                    if has_pending_alert(conn, key):
+                        print(f"[{key}] off-hours alert deferred (already queued)")
+                    else:
+                        enqueue_alert(conn, cfg, alert)
+                        queued += 1
+                        print(f"[{key}] off-hours alert queued for US session")
+                    continue
+                print(f"[{key}] off-hours {alert.alert_tier} move — posting allowed")
         except QualityError as e:
             print(f"[{key}] alert blocked by quality: {e}", file=sys.stderr)
             skipped_alerts += 1

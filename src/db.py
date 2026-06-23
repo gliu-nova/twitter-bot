@@ -56,6 +56,12 @@ def connect() -> sqlite3.Connection:
             themes TEXT NOT NULL
         );
     """)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(pending_alerts)")}
+    if "alert_tier" not in cols:
+        conn.execute(
+            "ALTER TABLE pending_alerts ADD COLUMN alert_tier TEXT NOT NULL DEFAULT 'normal'"
+        )
+        conn.commit()
     return conn
 
 
@@ -107,6 +113,14 @@ def record_alert(conn: sqlite3.Connection, indicator: str, value: float) -> None
     conn.commit()
 
 
+def has_pending_alert(conn: sqlite3.Connection, indicator: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM pending_alerts WHERE indicator = ? AND processed = 0 LIMIT 1",
+        (indicator,),
+    ).fetchone()
+    return row is not None
+
+
 def insert_pending_alert(
     conn: sqlite3.Connection,
     *,
@@ -120,11 +134,12 @@ def insert_pending_alert(
     score: float,
     is_macro: bool,
     triggered_at: str,
+    alert_tier: str = "normal",
 ) -> int:
     cur = conn.execute(
         """INSERT INTO pending_alerts
-           (indicator, value, prev_value, reasons, rule_types, themes, category, score, is_macro, triggered_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (indicator, value, prev_value, reasons, rule_types, themes, category, score, is_macro, triggered_at, alert_tier)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             indicator,
             value,
@@ -136,6 +151,7 @@ def insert_pending_alert(
             score,
             1 if is_macro else 0,
             triggered_at,
+            alert_tier,
         ),
     )
     conn.commit()
