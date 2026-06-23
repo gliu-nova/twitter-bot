@@ -47,9 +47,7 @@ TAKEAWAY_HINTS: dict[str, str] = {
     "btc": "Watch follow-through across risk assets.",
     "eth": "Alt breadth matters more than one name.",
     "sol": "High-beta move — risk appetite signal.",
-    "btc_liquidations": "Watch for reflexive follow-through.",
-    "eth_liquidations": "Watch for alt perp deleveraging.",
-    "sol_liquidations": "Watch for high-beta unwind cascades.",
+
     "btc_funding": "Crowded longs — squeeze risk elevated.",
     "eth_funding": "Funding extremes can front-run alt flows.",
     "sol_funding": "Positioning unwind risk on watch.",
@@ -108,10 +106,29 @@ def hydrate_liq_from_reasons(alert: AlertTrigger) -> None:
             alert.liq_short_usd = float(reason.removeprefix(LIQ_SHORT_PREFIX))
 
 
-def _format_liq_usd(value: float) -> str:
+def _format_liq_usd(value: float, *, precision: int = 1) -> str:
     if value >= 1_000_000:
-        return f"${value / 1_000_000:.1f}M"
+        m = value / 1_000_000
+        if precision == 0:
+            return f"${round(m)}M"
+        return f"${m:.1f}M"
     return f"${value:,.0f}"
+
+
+def _liq_skew(alert: AlertTrigger) -> str | None:
+    """Return 'long', 'short', or None for balanced liquidations."""
+    long_usd, short_usd = _liq_breakdown(alert)
+    if long_usd is None or short_usd is None:
+        return None
+    total = long_usd + short_usd
+    if total <= 0:
+        return None
+    long_share = long_usd / total
+    if long_share >= LIQ_SKEW_THRESHOLD:
+        return "long"
+    if long_share <= 1 - LIQ_SKEW_THRESHOLD:
+        return "short"
+    return None
 
 
 def _liq_breakdown(alert: AlertTrigger) -> tuple[float | None, float | None]:
@@ -121,34 +138,57 @@ def _liq_breakdown(alert: AlertTrigger) -> tuple[float | None, float | None]:
 
 def _liquidation_headline(alert: AlertTrigger) -> str:
     asset = alert.indicator.split("_")[0].upper()
-    long_usd, short_usd = _liq_breakdown(alert)
-    if long_usd is not None and short_usd is not None:
-        total = long_usd + short_usd
-        if total > 0:
-            long_share = long_usd / total
-            if long_share >= LIQ_SKEW_THRESHOLD:
-                return f"{asset} LONG FLUSH"
-            if long_share <= 1 - LIQ_SKEW_THRESHOLD:
-                return f"{asset} SHORT FLUSH"
+    skew = _liq_skew(alert)
+    if skew == "long":
+        return f"{asset} LONG FLUSH"
+    if skew == "short":
+        return f"{asset} SHORT FLUSH"
     return f"{asset} LIQUIDATIONS"
 
 
-def _liquidation_skew_context(alert: AlertTrigger) -> str | None:
+def _data_lines_for_liquidation(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    lines = [f"{_format_liq_usd(alert.value)} liquidations (1H)"]
     long_usd, short_usd = _liq_breakdown(alert)
-    if long_usd is None or short_usd is None:
-        return None
-    total = long_usd + short_usd
-    if total <= 0:
-        return None
-    long_share = long_usd / total
-    if long_share >= LIQ_SKEW_THRESHOLD:
-        return "Primarily long liquidations — classic leverage flush."
-    if long_share <= 1 - LIQ_SKEW_THRESHOLD:
-        return "Primarily short liquidations — upside cover flush."
-    return None
+    pct = abs(history.pct_change or alert.magnitude_pct) if alert.prev_value is not None else 0.0
+    pct_suffix = f" ({_format_pct_line(pct, up=_direction_up(alert))})" if pct > 0 else ""
+    if long_usd is not None and short_usd is not None:
+        lines.append(
+            f"Longs {_format_liq_usd(long_usd, precision=0)} | "
+            f"Shorts {_format_liq_usd(short_usd, precision=0)}{pct_suffix}"
+        )
+    elif pct > 0:
+        lines.append(_format_pct_line(pct, up=_direction_up(alert)))
+    return lines
+
+
+def _liquidation_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    if history.days_since_larger_move and history.days_since_larger_move >= 14:
+        return f"Biggest spike in {history.days_since_larger_move} days."
+    if history.is_largest_ytd and history.ytd_move_count >= 5:
+        return "Biggest spike of the year."
+    if alert.alert_tier == "emergency":
+        return "Historic liquidation spike."
+    skew = _liq_skew(alert)
+    if skew == "long":
+        return "Longs flushed on selloff — forced deleveraging."
+    if skew == "short":
+        return "Shorts flushed on rally — forced cover wave."
+    return "Mixed liquidation flow — both sides hit."
+
+
+def _liquidation_takeaway(alert: AlertTrigger) -> str:
+    skew = _liq_skew(alert)
+    if skew == "long":
+        return "Price under pressure — watch for follow-through or exhaustion."
+    if skew == "short":
+        return "Upside pressure — watch for cover exhaust or continuation."
+    asset = alert.indicator.split("_")[0].upper()
+    return f"{asset} liquidation wave — watch for follow-through or fade."
 
 
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    if alert.indicator.endswith("_liquidations"):
+        return _data_lines_for_liquidation(alert, history)
     lines = [_format_value(alert)]
     if alert.alert_unit == "percent" and alert.prev_value is not None:
         pct = abs(history.pct_change or alert.magnitude_pct)
@@ -160,10 +200,6 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
             sign = "+" if _direction_up(alert) else "-"
             move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
             lines.append(f"{sign}{move}")
-    if alert.indicator.endswith("_liquidations"):
-        long_usd, short_usd = _liq_breakdown(alert)
-        if long_usd is not None and short_usd is not None:
-            lines.append(f"Longs: {_format_liq_usd(long_usd)} | Shorts: {_format_liq_usd(short_usd)}")
     return lines
 
 
@@ -197,8 +233,6 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
         return "Largest move of the year."
     if alert.alert_tier == "emergency":
         return "Historic spike."
-    if alert.indicator.endswith("_liquidations"):
-        return _liquidation_skew_context(alert)
     return None
 
 
@@ -426,6 +460,23 @@ def _template_macro_release(
     )
 
 
+def _template_liquidation(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
+    return _assemble_tweet(
+        headline=_headline_for_alert(alert, major=False, emoji=emoji),
+        data_lines=_data_lines_for_liquidation(alert, history),
+        context=_liquidation_context(alert, history),
+        takeaway=_liquidation_takeaway(alert),
+    )
+
+
 def _template_major_move(
     alert: AlertTrigger,
     history: MoveHistory,
@@ -454,6 +505,9 @@ def _pick_single_template(
     *,
     is_emergency: bool,
 ) -> str:
+    if alert.indicator.endswith("_liquidations"):
+        return _template_liquidation(alert, history, posting_cfg, is_emergency=is_emergency)
+
     if is_emergency or alert.alert_tier == "emergency":
         return _template_major_move(alert, history, posting_cfg, is_emergency=True)
 
