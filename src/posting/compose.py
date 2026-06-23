@@ -25,6 +25,8 @@ MACRO_INDICATORS = {
     "pmi_manufacturing", "ism_services", "consumer_sentiment", "m2",
 }
 
+KEY_LEVEL_CROSS_INDICATORS = frozenset({"vix", "yield_curve", "cpi_yoy", "fed_funds"})
+
 THEME_HEADLINES: dict[str, str] = {
     "risk_on": "Risk-on shift",
     "risk_off": "Risk-off building",
@@ -181,10 +183,10 @@ def _cross_direction(alert: AlertTrigger) -> str | None:
     return None
 
 
-def _is_cross_only(alert: AlertTrigger) -> bool:
-    is_move_rule = any(r in ("percent_change", "absolute_change") for r in alert.rule_types)
-    is_cross_rule = any(r in ("crosses_above", "crosses_below") for r in alert.rule_types)
-    return is_cross_rule and not is_move_rule
+def _is_key_level_cross(alert: AlertTrigger) -> bool:
+    if alert.indicator not in KEY_LEVEL_CROSS_INDICATORS:
+        return False
+    return any(r in ("crosses_above", "crosses_below") for r in alert.rule_types)
 
 
 def _cross_context_line(alert: AlertTrigger) -> str | None:
@@ -208,18 +210,37 @@ def _major_for_headline(
     is_emergency: bool,
 ) -> bool:
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
-    is_move_rule = any(r in ("percent_change", "absolute_change") for r in alert.rule_types)
-    if history.is_all_time_high and not is_move_rule:
+    if history.is_all_time_high:
         return True
-    if _is_cross_only(alert):
+    if _is_key_level_cross(alert):
         return standout
     return is_emergency or alert.alert_tier == "emergency" or (
         standout and (alert.standalone_major or alert.score >= float(posting_cfg.get("high_single_threshold", 85)))
     )
 
 
+def _cross_sections(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+    emoji: str | None = None,
+) -> dict[str, Any]:
+    standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
+    resolved_emoji = emoji if emoji is not None else _emoji_for_post(
+        alert, history, posting_cfg, standout=standout, is_emergency=is_emergency,
+    )
+    return {
+        "headline": _headline_for_alert(alert, major=standout, emoji=resolved_emoji),
+        "data_lines": [_format_value(alert)],
+        "context": _cross_context_line(alert),
+        "takeaway": _takeaway_line(alert),
+    }
+
+
 def _multi_data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
-    if _is_cross_only(alert):
+    if _is_key_level_cross(alert):
         return [_format_value(alert)]
     short = _headline_name(alert, major=False)
     val = _format_value(alert)
@@ -314,19 +335,9 @@ def _template_cross(
     *,
     is_emergency: bool,
 ) -> str:
-    direction = _cross_direction(alert)
-    if not direction:
+    if not _cross_direction(alert):
         return _template_major_move(alert, history, posting_cfg, is_emergency=is_emergency)
-
-    standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
-    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
-    headline = _headline_for_alert(alert, major=standout, emoji=emoji)
-    return _assemble_tweet(
-        headline=headline,
-        data_lines=[_format_value(alert)],
-        context=_cross_context_line(alert),
-        takeaway=_takeaway_line(alert),
-    )
+    return _assemble_tweet(**_cross_sections(alert, history, posting_cfg, is_emergency=is_emergency))
 
 
 def _template_macro_release(
@@ -376,16 +387,13 @@ def _pick_single_template(
     *,
     is_emergency: bool,
 ) -> str:
-    is_move_rule = any(r in ("percent_change", "absolute_change") for r in alert.rule_types)
-    is_cross_rule = any(r in ("crosses_above", "crosses_below") for r in alert.rule_types)
-
     if is_emergency or alert.alert_tier == "emergency":
         return _template_major_move(alert, history, posting_cfg, is_emergency=True)
 
-    if history.is_all_time_high and not is_move_rule:
+    if history.is_all_time_high:
         return _template_ath(alert, history, posting_cfg, is_emergency=is_emergency)
 
-    if is_cross_rule and not is_move_rule:
+    if _is_key_level_cross(alert):
         return _template_cross(alert, history, posting_cfg, is_emergency=is_emergency)
 
     if alert.indicator in MACRO_INDICATORS or alert.is_macro:
@@ -429,13 +437,14 @@ def compose_multi_tweet(
     top = max(alerts, key=lambda x: x.score)
     top_hist = histories.get(top.indicator, MoveHistory())
     emoji = _multi_emoji(alerts, histories, posting_cfg, is_emergency=is_emergency)
-    headline = _headline_for_alert(
-        top, major=_major_for_headline(top, top_hist, posting_cfg, is_emergency=is_emergency), emoji=emoji,
-    )
 
     data_lines: list[str] = []
     for a in sorted(alerts, key=lambda x: x.score, reverse=True)[:4]:
         data_lines.extend(_multi_data_lines_for_alert(a, histories.get(a.indicator, MoveHistory())))
+
+    if _is_key_level_cross(top):
+        cross = _cross_sections(top, top_hist, posting_cfg, is_emergency=is_emergency, emoji=emoji)
+        return _assemble_tweet(headline=cross["headline"], data_lines=data_lines, context=cross["context"], takeaway=cross["takeaway"])
 
     implications = {
         "risk_on": "Risk-on across assets.",
@@ -446,11 +455,12 @@ def compose_multi_tweet(
         "tightening_conditions": "Tightening pressure rising.",
         "housing": "Housing indicators diverging.",
     }
-    context = _cross_context_line(top) if _is_cross_only(top) else (_context_line(top, top_hist) or implications.get(theme))
-    takeaway = _takeaway_line(top) if _is_cross_only(top) else "Watch follow-through across the cluster."
+    headline = _headline_for_alert(
+        top, major=_major_for_headline(top, top_hist, posting_cfg, is_emergency=is_emergency), emoji=emoji,
+    )
     return _assemble_tweet(
         headline=headline,
         data_lines=data_lines,
-        context=context,
-        takeaway=takeaway,
+        context=_context_line(top, top_hist) or implications.get(theme),
+        takeaway="Watch follow-through across the cluster.",
     )
