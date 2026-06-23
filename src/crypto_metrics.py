@@ -218,7 +218,11 @@ def verify_exchange_spread_mid(settings: dict[str, Any], tolerance_pct: float, n
     kraken_px, _ = _kraken_latest(asset_cfg["kraken"])
     coinbase_px, _ = _coinbase_spot(asset_cfg["coinbase"])
     mid = (kraken_px + coinbase_px) / 2
-    cg_px, _ = _coingecko_latest(asset_cfg["coingecko"])
+    try:
+        cg_px, _ = _coingecko_latest(asset_cfg["coingecko"])
+    except FetchError as e:
+        print(f"[warn] {name}: CoinGecko verification skipped ({e})")
+        return
     if mid == 0:
         raise FetchError(f"{name}: spread mid is zero")
     diff_pct = abs((mid - cg_px) / cg_px) * 100

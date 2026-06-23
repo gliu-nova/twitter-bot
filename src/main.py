@@ -93,6 +93,10 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             print(f"[{key}] quality rejected: {e}", file=sys.stderr)
             errors += 1
             continue
+        except FetchError as e:
+            print(f"[{key}] quality rejected: {e}", file=sys.stderr)
+            errors += 1
+            continue
 
         label = interval_label(settings, cfg)
         print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [poll every {label}]")

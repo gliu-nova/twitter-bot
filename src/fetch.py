@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -97,20 +98,27 @@ def _yahoo_latest(symbol: str) -> tuple[float, str]:
 
 
 def _coingecko_latest(coin_id: str) -> tuple[float, str]:
-    resp = requests.get(
-        COINGECKO_BASE,
-        params={"ids": coin_id, "vs_currencies": "usd"},
-        timeout=30,
-    )
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        raise FetchError(f"CoinGecko error: {e}") from e
-    data = resp.json()
-    if coin_id not in data or "usd" not in data[coin_id]:
-        raise FetchError(f"No CoinGecko price for {coin_id}")
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return float(data[coin_id]["usd"]), today
+    last_error: requests.HTTPError | None = None
+    for attempt in range(3):
+        resp = requests.get(
+            COINGECKO_BASE,
+            params={"ids": coin_id, "vs_currencies": "usd"},
+            timeout=30,
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            last_error = e
+            if resp.status_code == 429 and attempt < 2:
+                time.sleep(2**attempt)
+                continue
+            raise FetchError(f"CoinGecko error: {e}") from e
+        data = resp.json()
+        if coin_id not in data or "usd" not in data[coin_id]:
+            raise FetchError(f"No CoinGecko price for {coin_id}")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return float(data[coin_id]["usd"]), today
+    raise FetchError(f"CoinGecko error: {last_error}")
 
 
 def _kraken_latest(pair: str) -> tuple[float, str]:

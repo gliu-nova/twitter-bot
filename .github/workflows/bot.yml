@@ -42,9 +42,6 @@ jobs:
           key: bot-data-v3-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-data-v3-${{ github.ref_name }}-
-            bot-data-v2-${{ github.ref_name }}-
-            bot-data-v2-
-            bot-data-v1
 
       - name: Log cache restore
         run: |
