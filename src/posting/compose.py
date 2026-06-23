@@ -396,11 +396,21 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
             ))
             return f"New ATH — prior record {prior}."
         return "New all-time high."
+    if history.level_extreme:
+        return history.level_extreme
+    cross = _cross_context_line(alert)
+    if cross:
+        return cross
     if history.days_since_larger_move and history.days_since_larger_move >= 14:
+        word = "gain" if up else "decline"
+        return f"Largest daily {word} in {history.days_since_larger_move} days."
+    if history.days_since_larger_move and history.days_since_larger_move >= 7:
         word = "gain" if up else "decline"
         return f"Largest daily {word} in {history.days_since_larger_move} days."
     if history.is_largest_ytd and history.ytd_move_count >= 5:
         return "Largest move of the year."
+    if history.is_largest_ytd and history.ytd_move_count >= 2:
+        return "Largest move tracked this year."
     if alert.alert_tier == "emergency":
         return "Historic spike."
     return None

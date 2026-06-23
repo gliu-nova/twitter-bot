@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import sqlite3
 
@@ -8,6 +9,21 @@ from src.posting.models import AlertTrigger
 
 # Only claim ATH for series that trend to new highs (not yields, spreads, macro)
 ATH_INDICATORS = {"btc", "eth", "sol", "sp500", "nasdaq100", "gold", "silver"}
+
+# Level-based high/low context (yields, spreads, vol — not ATH price series)
+LEVEL_EXTREME_INDICATORS = {
+    "treasury_10y",
+    "fed_funds",
+    "mortgage_30y",
+    "hy_spread",
+    "move",
+    "vix",
+    "dxy",
+    "yield_curve",
+    "cpi_yoy",
+    "unemployment",
+    "oil",
+}
 
 
 @dataclass
@@ -19,6 +35,7 @@ class MoveHistory:
     prior_record: float | None = None
     is_largest_ytd: bool = False
     ytd_move_count: int = 0
+    level_extreme: str | None = None
 
 
 def _daily_closes(conn: sqlite3.Connection, indicator: str) -> list[tuple[str, float]]:
@@ -34,6 +51,42 @@ def _daily_closes(conn: sqlite3.Connection, indicator: str) -> list[tuple[str, f
     return sorted(by_day.items())
 
 
+def _level_extreme_phrase(daily: list[tuple[str, float]], value: float) -> str | None:
+    """Return e.g. '90-day high.' when value is at the window extreme."""
+    if len(daily) < 5:
+        return None
+    try:
+        last_day = datetime.fromisoformat(daily[-1][0])
+    except ValueError:
+        return None
+
+    for window_days in (90, 60, 30, 14):
+        cutoff = (last_day - timedelta(days=window_days)).date().isoformat()
+        chunk = [(d, v) for d, v in daily if d >= cutoff]
+        if len(chunk) < 5:
+            continue
+        vals = [v for _, v in chunk]
+        hi, lo = max(vals), min(vals)
+        if value >= hi - 1e-9:
+            return f"{window_days}-day high."
+        if value <= lo + 1e-9:
+            return f"{window_days}-day low."
+    return None
+
+
+def _apply_level_extreme(
+    daily: list[tuple[str, float]],
+    alert: AlertTrigger,
+    history: MoveHistory,
+) -> MoveHistory:
+    if alert.indicator not in LEVEL_EXTREME_INDICATORS:
+        return history
+    phrase = _level_extreme_phrase(daily, alert.value)
+    if phrase:
+        history.level_extreme = phrase
+    return history
+
+
 def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHistory:
     history = MoveHistory()
     if alert.prev_value is None:
@@ -46,7 +99,7 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
 
     daily = _daily_closes(conn, alert.indicator)
     if len(daily) < 2:
-        return _apply_ath(conn, alert, history)
+        return _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
 
     changes: list[tuple[str, float]] = []
     for i in range(1, len(daily)):
@@ -58,7 +111,7 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
         changes.append((c_day, pct))
 
     if not changes:
-        return _apply_ath(conn, alert, history)
+        return _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
 
     # Prefer day-over-day change from stored daily closes
     last_pct = changes[-1][1]
@@ -82,7 +135,7 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
         history.is_largest_ytd = True
         history.ytd_move_count = len(ytd_moves)
 
-    return _apply_ath(conn, alert, history)
+    return _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
 
 
 def _apply_ath(conn: sqlite3.Connection, alert: AlertTrigger, history: MoveHistory) -> MoveHistory:
