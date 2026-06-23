@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: data
-          key: bot-data-v2-${{ github.run_id }}
+          key: bot-data-v2-${{ github.ref_name }}
           restore-keys: |
             bot-data-v2-
             bot-data-v1
@@ -96,4 +96,4 @@ jobs:
         if: always()
         with:
           path: data
-          key: bot-data-v2-${{ github.run_id }}
+          key: bot-data-v2-${{ github.ref_name }}
