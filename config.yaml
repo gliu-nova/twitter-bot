@@ -14,7 +14,8 @@ scheduler:
 posting:
   daily_post_cap: 2          # regular posts only; emergencies bypass this cap
   # indicator_cooldown_hours: global min between posts per indicator (non-emergency).
-  # Emergencies still honor each indicator's cooldown_hours (e.g. 3h for liquidations).
+  # Emergencies honor each indicator's cooldown_hours (24h for liquidations).
+  # Same-day repost only if emergency tier AND value >= emergency_escalation_multiplier x last post.
   emergency_threshold: 90
   high_single_threshold: 85
   multi_threshold: 120
@@ -571,7 +572,8 @@ indicators:
     asset: BTC
     liquidation_window_minutes: 60
     alert_unit: percent
-    cooldown_hours: 3
+    cooldown_hours: 24
+    emergency_escalation_multiplier: 2.5
     normal_alert: 75
     major_alert: 150
     emergency_alert: 300
@@ -582,7 +584,8 @@ indicators:
     asset: ETH
     liquidation_window_minutes: 60
     alert_unit: percent
-    cooldown_hours: 3
+    cooldown_hours: 24
+    emergency_escalation_multiplier: 2.5
     normal_alert: 75
     major_alert: 150
     emergency_alert: 300
@@ -596,7 +599,8 @@ indicators:
     asset: SOL
     liquidation_window_minutes: 60
     alert_unit: percent
-    cooldown_hours: 3
+    cooldown_hours: 24
+    emergency_escalation_multiplier: 2.5
     normal_alert: 80
     major_alert: 160
     emergency_alert: 320

@@ -126,15 +126,19 @@ def check_alert(
         (key,),
     ).fetchone()
     alert_row = conn.execute(
-        "SELECT last_alert_at FROM alert_log WHERE indicator = ?",
+        "SELECT last_value, last_alert_at FROM alert_log WHERE indicator = ?",
         (key,),
     ).fetchone()
     last_alert_at = alert_row["last_alert_at"] if alert_row else None
 
-    if _in_cooldown(last_alert_at, cooldown):
-        return False, None
-
     prev = float(prev_row["value"]) if prev_row else None
+
+    if _in_cooldown(last_alert_at, cooldown):
+        tier = _detect_tier(settings, prev, value)
+        last_val = float(alert_row["last_value"]) if alert_row and alert_row["last_value"] is not None else None
+        mult = float(settings.get("emergency_escalation_multiplier", 2.0))
+        if not (tier == "emergency" and last_val is not None and value >= last_val * mult):
+            return False, None
     reasons: list[str] = []
     rule_types: list[str] = []
     for rule in rules:

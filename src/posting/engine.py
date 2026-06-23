@@ -11,6 +11,7 @@ from src.db import (
     fetch_pending_alerts,
     hours_since_indicator_post,
     insert_pending_alert,
+    last_alert,
     mark_alerts_processed,
     posts_today,
     recent_tweet_categories,
@@ -67,6 +68,21 @@ def _should_flush_market(
     return age_minutes >= buffer_min
 
 
+def _emergency_escalation_allows_repost(
+    conn: sqlite3.Connection,
+    alert: AlertTrigger,
+    settings: dict[str, Any],
+) -> bool:
+    """Allow a same-day repost only when emergency tier and size clearly escalated."""
+    if alert.alert_tier != "emergency":
+        return False
+    row = last_alert(conn, alert.indicator)
+    if not row or row["last_value"] is None:
+        return False
+    mult = float(settings.get("emergency_escalation_multiplier", 2.0))
+    return alert.value >= float(row["last_value"]) * mult
+
+
 def _in_cooldown(
     conn: sqlite3.Connection,
     alert: AlertTrigger,
@@ -82,9 +98,13 @@ def _in_cooldown(
     indicator_cd = float(settings.get("cooldown_hours", 24))
     global_cd = float(posting_cfg.get("indicator_cooldown_hours", 36))
     # Emergency bypasses daily cap and the global 36h cap, but still honors
-    # per-indicator cooldown_hours (e.g. 3h for liquidations).
+    # per-indicator cooldown_hours (24h for liquidations).
     min_hours = indicator_cd if is_emergency else max(indicator_cd, global_cd)
-    return hours < min_hours
+    if hours >= min_hours:
+        return False
+    if is_emergency and _emergency_escalation_allows_repost(conn, alert, settings):
+        return False
+    return True
 
 
 def _daily_cap_reached(conn: sqlite3.Connection, posting_cfg: dict[str, Any]) -> bool:
