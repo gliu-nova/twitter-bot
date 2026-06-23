@@ -1,8 +1,23 @@
+"""Compose X/Twitter alert text.
+
+Tweet style (max 280 chars):
+  headline
+  [blank line]
+  data (values/%% on separate lines when useful)
+  [blank line]
+  context (rarity, one short line)
+  [blank line]
+  → takeaway
+
+Professional and data-driven. Succinct — no text blobs.
+Emojis: max 1 per post, only for exceptional moves; most posts have none.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
-from src.posting.history import MoveHistory, rarity_phrase
+from src.posting.history import MoveHistory
 from src.posting.models import AlertTrigger
 
 MACRO_INDICATORS = {
@@ -57,6 +72,25 @@ CONTEXT_HINTS: dict[str, str] = {
     "sol_liquidations": "SOL liquidation spikes can accelerate high-beta unwind cascades.",
 }
 
+# Short closing lines (→ prefixed in output)
+TAKEAWAY_HINTS: dict[str, str] = {
+    "btc": "Watch follow-through across risk assets.",
+    "eth": "Alt breadth matters more than one name.",
+    "sol": "High-beta move — risk appetite signal.",
+    "btc_liquidations": "Watch for reflexive follow-through.",
+    "eth_liquidations": "Watch for alt perp deleveraging.",
+    "sol_liquidations": "Watch for high-beta unwind cascades.",
+    "btc_funding": "Crowded longs — squeeze risk elevated.",
+    "eth_funding": "Funding extremes can front-run alt flows.",
+    "sol_funding": "Positioning unwind risk on watch.",
+    "sp500": "Rates and USD reaction next.",
+    "vix": "Vol elevated — multiples under pressure.",
+    "treasury_10y": "Rippling through equities and housing.",
+    "yield_curve": "Growth vs recession repricing.",
+    "cpi_yoy": "Fed expectations and real yields in focus.",
+    "fear_greed": "Sentiment extreme — trend or contrarian?",
+}
+
 CROSS_CONTEXT: dict[str, dict[str, str]] = {
     "vix": {
         "above": "Elevated volatility often signals rising market stress.",
@@ -79,6 +113,86 @@ DOWN_MILD = ("dropped", "slid", "fell", "pulled back")
 CROSS_ABOVE = ("crossed above", "broke above", "cleared")
 CROSS_BELOW = ("fell below", "slipped under", "dropped under")
 FLIP_VERBS = ("flipped", "turned", "shifted")
+
+
+def _assemble_tweet(
+    *,
+    headline: str,
+    data_lines: list[str] | None = None,
+    context: str | None = None,
+    takeaway: str | None = None,
+) -> str:
+    """Join sections with blank lines; trim to 280 chars."""
+    parts: list[str] = [headline.strip()]
+    if data_lines:
+        parts.append("\n".join(line for line in data_lines if line))
+    if context:
+        parts.append(context.strip())
+    if takeaway:
+        parts.append(f"→ {takeaway.strip().rstrip('.')}.")
+    return "\n\n".join(parts)[:280]
+
+
+def _format_pct_line(pct: float, *, up: bool) -> str:
+    sign = "+" if up else "-"
+    mag = abs(pct)
+    if mag >= 1000:
+        return f"{sign}{mag:,.0f}%"
+    if mag >= 100:
+        return f"{sign}{mag:,.1f}%"
+    return f"{sign}{mag:.1f}%"
+
+
+def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    lines = [_format_value(alert)]
+    if alert.alert_unit == "percent" and alert.prev_value is not None:
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            lines.append(_format_pct_line(pct, up=_direction_up(alert)))
+    elif alert.alert_unit == "absolute" and alert.prev_value is not None:
+        bps = abs(history.abs_change) * 100
+        if bps >= 0.01:
+            sign = "+" if _direction_up(alert) else "-"
+            move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
+            lines.append(f"{sign}{move}")
+    return lines
+
+
+def _headline_name(alert: AlertTrigger, *, major: bool) -> str:
+    if alert.indicator.endswith("_liquidations"):
+        asset = alert.indicator.split("_")[0].upper()
+        return f"{asset} Liquidations (1H)" if major else f"{asset} LIQUIDATIONS"
+    return _display_name(alert)
+
+
+def _headline_for_alert(alert: AlertTrigger, *, major: bool, emoji: str) -> str:
+    name = _headline_name(alert, major=major)
+    body = f"MAJOR MOVE: {name}" if major else name
+    return f"{emoji}{body}".strip()
+
+
+def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    up = _direction_up(alert)
+    if history.is_all_time_high:
+        return "New all-time high."
+    if history.days_since_larger_move and history.days_since_larger_move >= 14:
+        word = "spike" if up else "drop"
+        return f"Largest {word} in {history.days_since_larger_move} days."
+    if history.is_largest_ytd and history.ytd_move_count >= 5:
+        return "Largest move of the year."
+    if alert.alert_tier == "emergency":
+        return "(historic spike)"
+    return None
+
+
+def _takeaway_line(alert: AlertTrigger) -> str:
+    if alert.indicator in TAKEAWAY_HINTS:
+        return TAKEAWAY_HINTS[alert.indicator]
+    ctx = CONTEXT_HINTS.get(alert.indicator, "Watch follow-through.")
+    part = ctx.split("—")[0].split(" - ")[0].strip()
+    if len(part) > 72:
+        part = part[:69].rstrip() + "..."
+    return part if part.endswith(".") else f"{part}."
 
 
 def _pick(options: tuple[str, ...], alert: AlertTrigger) -> str:
@@ -162,51 +276,47 @@ def _is_standout(alert: AlertTrigger, history: MoveHistory, posting_cfg: dict[st
     return False
 
 
-def _emoji(alert: AlertTrigger, *, standout: bool) -> str:
-    if not standout:
-        return ""
-    up = _direction_up(alert)
-    if alert.alert_tier == "emergency":
-        return "🔥 " if up else "⚠️ "
-    if any(r in ("crosses_above", "crosses_below") for r in alert.rule_types):
-        return "⚠️ "
-    return "📈 " if up else "📉 "
-
-
-def _emergency_prefix(
+def _emoji_for_post(
     alert: AlertTrigger,
+    history: MoveHistory,
     posting_cfg: dict[str, Any],
     *,
     standout: bool,
-    force_caps: bool = False,
+    is_emergency: bool,
 ) -> str:
-    if force_caps or alert.alert_tier == "emergency":
-        name = _display_name(alert).upper()
-        verb = _move_verb(alert, strong=True).upper()
-        return f"MAJOR MOVE: {name} {verb} "
-    if not standout:
+    """At most one emoji; only for exceptional moves."""
+    if not standout and not is_emergency:
         return ""
+    if is_emergency or alert.alert_tier == "emergency":
+        return "🚨 "
+    if history.is_all_time_high:
+        return "🚨 "
     if alert.score >= float(posting_cfg.get("emergency_threshold", 90)):
-        name = _display_name(alert).upper()
-        verb = _move_verb(alert, strong=True).upper()
-        return f"MAJOR MOVE: {name} {verb} "
-    if alert.indicator == "yield_curve" and _cross_direction(alert):
-        return "BREAKING: Yield curve "
+        return "🚨 "
+    if alert.standalone_major and alert.alert_tier in ("major", "emergency"):
+        return "🚨 "
+    if any(r in ("crosses_above", "crosses_below") for r in alert.rule_types):
+        if alert.indicator in ("vix", "yield_curve", "cpi_yoy", "fed_funds"):
+            return "⚠️ "
     return ""
 
 
 def _template_ath(alert: AlertTrigger, history: MoveHistory, posting_cfg: dict[str, Any], *, is_emergency: bool) -> str:
-    name = _display_name(alert)
-    val = _format_value(alert)
-    prefix = "🚨 "
-    body = f"{name} reached a new all-time high above {val}."
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=True, is_emergency=is_emergency)
+    headline = _headline_for_alert(alert, major=False, emoji=emoji)
+    data_lines = [_format_value(alert)]
+    context = "New all-time high."
     if history.prior_record is not None:
         prior = _format_value(AlertTrigger(
             alert.indicator, alert.name, history.prior_record, None, [], [], [], "", False, alert.timestamp,
         ))
-        body += f" Previous record: {prior}."
-    ctx = CONTEXT_HINTS.get(alert.indicator, "ATH breaks often attract momentum — watch follow-through.")
-    return f"{prefix}{body} {ctx}"[:280]
+        context = f"New ATH — prior record {prior}."
+    return _assemble_tweet(
+        headline=headline,
+        data_lines=data_lines,
+        context=context,
+        takeaway=_takeaway_line(alert),
+    )
 
 
 def _template_cross(
@@ -220,25 +330,26 @@ def _template_cross(
     if not direction:
         return _template_major_move(alert, history, posting_cfg, is_emergency=is_emergency)
 
-    name = _display_name(alert)
-    val = _format_value(alert)
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
-    prefix = _emergency_prefix(alert, posting_cfg, standout=standout) or "🚨 "
-    verb = _cross_verb(alert, direction)
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
+    headline = _headline_for_alert(alert, major=standout, emoji=emoji)
+    data_lines = [_format_value(alert)]
 
     if alert.indicator == "yield_curve":
-        if direction == "above":
-            opener = f"{prefix}uninverted — now {val}."
-        else:
-            opener = f"{prefix}inverted — now {val}."
+        context = "Uninverted." if direction == "above" else "Inverted."
     else:
-        bound = next((r.split()[-1] for r in alert.reasons if "crossed" in r), val)
-        opener = f"{prefix}{name} {verb} {bound} — now {val}."
+        bound = next((r.split()[-1] for r in alert.reasons if "crossed" in r), None)
+        verb = _cross_verb(alert, direction)
+        context = f"{verb} {bound}." if bound else "Key level break."
 
-    ctx = CROSS_CONTEXT.get(alert.indicator, {}).get(direction)
-    if not ctx:
-        ctx = CONTEXT_HINTS.get(alert.indicator, "Level break — watching follow-through.")
-    return f"{opener} {ctx}"[:280]
+    cross_ctx = CROSS_CONTEXT.get(alert.indicator, {}).get(direction)
+    takeaway = cross_ctx or _takeaway_line(alert)
+    return _assemble_tweet(
+        headline=headline,
+        data_lines=data_lines,
+        context=context,
+        takeaway=takeaway,
+    )
 
 
 def _template_macro_release(
@@ -248,23 +359,16 @@ def _template_macro_release(
     *,
     is_emergency: bool,
 ) -> str:
-    name = _display_name(alert)
-    val = _format_value(alert)
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
-    prefix = _emergency_prefix(alert, posting_cfg, standout=standout) or "🚨 "
-    verb = "rose to" if _direction_up(alert) else "fell to"
-    if alert.prev_value is not None and history.abs_change:
-        opener = f"{prefix}{name} {verb} {val}."
-    else:
-        opener = f"{prefix}{name} at {val}."
-
-    rarity = rarity_phrase(history, direction_up=_direction_up(alert))
-    ctx = CONTEXT_HINTS.get(alert.indicator, "Macro data shift — markets repricing.")
-    parts = [opener]
-    if rarity:
-        parts.append(rarity)
-    parts.append(ctx)
-    return " ".join(parts)[:280]
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
+    headline = _headline_for_alert(alert, major=standout, emoji=emoji)
+    data_lines = _data_lines_for_alert(alert, history) if alert.prev_value is not None else [_format_value(alert)]
+    return _assemble_tweet(
+        headline=headline,
+        data_lines=data_lines,
+        context=_context_line(alert, history),
+        takeaway=_takeaway_line(alert),
+    )
 
 
 def _template_major_move(
@@ -274,54 +378,19 @@ def _template_major_move(
     *,
     is_emergency: bool,
 ) -> str:
-    name = _display_name(alert)
-    val = _format_value(alert)
-    tier = _tier_label(alert.alert_tier)
-    strong = alert.alert_tier in ("major", "emergency")
-    verb = _move_verb(alert, strong=strong)
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
-    force_caps = is_emergency or alert.alert_tier == "emergency"
-    prefix = _emergency_prefix(alert, posting_cfg, standout=standout, force_caps=force_caps)
-    emoji = "" if prefix else _emoji(alert, standout=standout and not force_caps)
-
-    if force_caps and prefix.endswith(" "):
-        # Caps prefix already includes name+verb; shorten opener
-        if alert.alert_unit == "percent" and alert.prev_value is not None:
-            pct = abs(history.pct_change or alert.magnitude_pct)
-            opener = f"{prefix}{pct:.1f}% to {val} (historic move)."
-        elif alert.alert_unit == "absolute" and alert.prev_value is not None:
-            bps = abs(history.abs_change) * 100
-            move_txt = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
-            opener = f"{prefix}{move_txt} to {val} (historic move)."
-        else:
-            opener = f"{prefix}to {val} (historic move)."
-        rarity = rarity_phrase(history, direction_up=_direction_up(alert))
-        ctx = CONTEXT_HINTS.get(alert.indicator, "Watching for follow-through across markets.")
-        parts = [opener]
-        if rarity:
-            parts.append(rarity)
-        parts.append(ctx)
-        return " ".join(parts)[:280]
-
-    if alert.alert_unit == "absolute" and alert.prev_value is not None:
-        bps = abs(history.abs_change) * 100
-        move_txt = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
-        opener = f"{prefix}{emoji}{name} {verb} {move_txt} to {val} ({tier} move)."
-    elif alert.alert_unit == "percent" and alert.prev_value is not None:
-        pct = abs(history.pct_change or alert.magnitude_pct)
-        opener = f"{prefix}{emoji}{name} {verb} {pct:.1f}% today to {val} ({tier} move)."
-    elif alert.prev_value is not None:
-        opener = f"{prefix}{emoji}{name} {verb} to {val} ({tier} move)."
-    else:
-        opener = f"{prefix}{emoji}{name} at {val} ({tier} move)."
-
-    rarity = rarity_phrase(history, direction_up=_direction_up(alert))
-    ctx = CONTEXT_HINTS.get(alert.indicator, "Watching for follow-through across markets.")
-    parts = [opener]
-    if rarity:
-        parts.append(rarity)
-    parts.append(ctx)
-    return " ".join(parts)[:280]
+    major = is_emergency or alert.alert_tier == "emergency" or (
+        standout and (alert.standalone_major or alert.score >= float(posting_cfg.get("high_single_threshold", 85)))
+    )
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
+    headline = _headline_for_alert(alert, major=major, emoji=emoji)
+    data_lines = _data_lines_for_alert(alert, history) if alert.prev_value is not None else [_format_value(alert)]
+    return _assemble_tweet(
+        headline=headline,
+        data_lines=data_lines,
+        context=_context_line(alert, history),
+        takeaway=_takeaway_line(alert),
+    )
 
 
 def _pick_single_template(
@@ -374,43 +443,42 @@ def compose_multi_tweet(
     theme = theme or (alerts[0].themes[0] if alerts[0].themes else "markets")
     headline = THEME_HEADLINES.get(theme, "Market move")
 
+    top = max(alerts, key=lambda x: x.score)
+    top_hist = histories.get(top.indicator, MoveHistory())
     standout = is_emergency or any(
         _is_standout(a, histories.get(a.indicator, MoveHistory()), posting_cfg, is_emergency=is_emergency)
         for a in alerts
     )
-    prefix = "🔥 " if standout and theme in ("crypto", "risk_on") else ("⚠️ " if standout else "")
+    emoji = ""
+    if standout and (is_emergency or top.alert_tier == "emergency"):
+        emoji = "🚨 "
+    elif standout and theme in ("risk_off",):
+        emoji = "⚠️ "
 
-    parts: list[str] = []
-    used_verbs: set[str] = set()
+    data_lines: list[str] = []
     for a in sorted(alerts, key=lambda x: x.score, reverse=True)[:4]:
         hist = histories.get(a.indicator, MoveHistory())
-        strong = a.alert_tier in ("major", "emergency")
-        verb = _move_verb(a, strong=strong)
-        while verb in used_verbs and len(used_verbs) < 4:
-            verb = _move_verb(a, strong=not strong)
-        used_verbs.add(verb.split()[0])
+        short = _headline_name(a, major=False)
         val = _format_value(a)
-        short = _display_name(a)
-        parts.append(f"{short} {verb} ({val})")
+        if a.prev_value is not None and a.alert_unit == "percent":
+            pct = abs(hist.pct_change or a.magnitude_pct)
+            if pct > 0:
+                data_lines.append(f"{short} {val} ({_format_pct_line(pct, up=_direction_up(a))})")
+                continue
+        data_lines.append(f"{short} {val}")
 
-    body = ", ".join(parts)
     implications = {
-        "risk_on": "Breadth improving — risk appetite may be rotating back into growth assets.",
-        "risk_off": "Defensive tone strengthening — could pressure equities and crypto.",
-        "crypto": "Crypto momentum building — watching BTC dominance and equity correlation.",
-        "inflation_pressure": "Inflation signals stacking — yields and the dollar may react.",
-        "easing_conditions": "Easing tone building — liquidity-sensitive assets on watch.",
-        "tightening_conditions": "Tightening pressure rising — multiples and crypto vulnerable.",
-        "housing": "Housing indicators diverging — affordability vs demand in focus.",
+        "risk_on": "Risk appetite improving across assets.",
+        "risk_off": "Defensive tone building.",
+        "crypto": "Crypto momentum building.",
+        "inflation_pressure": "Inflation signals stacking.",
+        "easing_conditions": "Easing tone building.",
+        "tightening_conditions": "Tightening pressure rising.",
+        "housing": "Housing indicators diverging.",
     }
-    context = implications.get(theme, "Cross-asset move with a coherent story — follow-through matters.")
-
-    # Add rarity if top alert has it
-    top = max(alerts, key=lambda x: x.score)
-    top_hist = histories.get(top.indicator, MoveHistory())
-    rarity = rarity_phrase(top_hist, direction_up=_direction_up(top))
-    text = f"{prefix}{headline}: {body}. {context}"
-    if rarity and len(text) + len(rarity) < 270:
-        text = f"{prefix}{headline}: {body}. {rarity} {context}"
-
-    return text[:280]
+    return _assemble_tweet(
+        headline=f"{emoji}{headline}".strip(),
+        data_lines=data_lines,
+        context=_context_line(top, top_hist) or implications.get(theme),
+        takeaway="Follow-through matters across the cluster.",
+    )
