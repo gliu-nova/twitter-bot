@@ -106,6 +106,27 @@ def hydrate_liq_from_reasons(alert: AlertTrigger) -> None:
             alert.liq_short_usd = float(reason.removeprefix(LIQ_SHORT_PREFIX))
 
 
+def _ensure_liq_breakdown(alert: AlertTrigger) -> None:
+    """Fill long/short split from reasons or live OKX fetch (queued alerts may lack tokens)."""
+    hydrate_liq_from_reasons(alert)
+    if alert.liq_long_usd is not None and alert.liq_short_usd is not None:
+        return
+    if not alert.indicator.endswith("_liquidations"):
+        return
+    try:
+        from src.config import indicator_settings, load_config
+        from src.crypto_metrics import fetch_liquidation_metric
+
+        settings = indicator_settings(load_config(), alert.indicator)
+        if settings.get("source") != "okx_liquidations":
+            return
+        _, long_usd, short_usd, _ = fetch_liquidation_metric(settings)
+        alert.liq_long_usd = long_usd
+        alert.liq_short_usd = short_usd
+    except Exception:
+        return
+
+
 def _format_liq_usd(value: float, *, precision: int = 1) -> str:
     if value >= 1_000_000:
         m = value / 1_000_000
@@ -467,6 +488,7 @@ def _template_liquidation(
     *,
     is_emergency: bool,
 ) -> str:
+    _ensure_liq_breakdown(alert)
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
     return _assemble_tweet(
