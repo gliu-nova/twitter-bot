@@ -3,6 +3,19 @@
 ## Project Overview
 Python bot that ingests market/macro indicators (Yahoo, FRED, CoinGecko), stores readings in SQLite, and posts X/Twitter alerts when configurable thresholds are crossed. Config: `config.yaml`. Entry point: `run.py`.
 
+## X/Twitter Post Format (`src/posting/compose.py`)
+Posts must be scannable, not text blobs. Max ~280 characters. Tone: professional, data-driven.
+
+**Structure** (blank line between sections):
+1. Headline (indicator name; `MAJOR MOVE:` prefix only for exceptional events)
+2. Data — values and % changes on separate lines when useful
+3. Context — one short line (rarity, level break, historic spike)
+4. Takeaway — `→` prefix, one concise line
+
+**Emojis:** Max 1 per post (`🚨` `⚠️` `📈` `📉`). Use only for exceptional moves (emergency tier, ATH, standalone major liquidations, key macro breaks). Most posts have **no** emoji.
+
+**Style:** Succinct. Avoid editorializing. Numbers lead; context follows.
+
 ## Core Coding Principles
 
 ### 1. Think Before Coding
