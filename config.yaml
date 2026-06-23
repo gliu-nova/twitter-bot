@@ -574,8 +574,8 @@ indicators:
     alert_unit: percent
     cooldown_hours: 24
     emergency_escalation_multiplier: 2.5
-    normal_alert: 75
-    major_alert: 150
+    normal_alert: 100
+    major_alert: 180
     emergency_alert: 300
 
   eth_liquidations:
