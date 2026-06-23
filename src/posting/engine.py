@@ -49,6 +49,7 @@ def _row_to_alert(row: sqlite3.Row, cfg: dict[str, Any]) -> AlertTrigger:
         db_id=int(row["id"]),
         standalone_major=bool(settings.get("standalone_major")),
         alert_tier=str(row["alert_tier"]) if row["alert_tier"] else "normal",
+        alert_unit=str(settings.get("alert_unit", "percent")),
     )
     hydrate_liq_from_reasons(alert)
     return alert

@@ -57,6 +57,9 @@ TAKEAWAY_HINTS: dict[str, str] = {
     "yield_curve": "Growth vs recession repricing.",
     "cpi_yoy": "Fed expectations and real yields in focus.",
     "fear_greed": "Sentiment extreme — trend or contrarian?",
+    "btc_exchange_spread": "Cross-venue gap — watch arb and liquidity stress.",
+    "eth_exchange_spread": "Cross-venue gap — watch arb and liquidity stress.",
+    "sol_exchange_spread": "Cross-venue gap — watch arb and liquidity stress.",
 }
 
 def _assemble_tweet(
@@ -207,20 +210,67 @@ def _liquidation_takeaway(alert: AlertTrigger) -> str:
     return f"{asset} liquidation wave — watch for follow-through or fade."
 
 
+def _exchange_spread_headline(alert: AlertTrigger) -> str:
+    asset = alert.indicator.split("_")[0].upper()
+    if alert.prev_value is not None:
+        if alert.value < alert.prev_value:
+            return f"{asset} SPREAD COMPRESS"
+        if alert.value > alert.prev_value:
+            return f"{asset} SPREAD WIDEN"
+    return f"{asset} EXCHANGE SPREAD"
+
+
+def _data_lines_for_exchange_spread(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    line = f"{_format_value(alert)} Kraken vs Coinbase"
+    if alert.prev_value is not None:
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            line += f" ({_format_pct_line(pct, up=_direction_up(alert))} vs prior)"
+    return [line]
+
+
+def _exchange_spread_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    compressing = alert.prev_value is not None and alert.value < alert.prev_value
+    widening = alert.prev_value is not None and alert.value > alert.prev_value
+    if history.days_since_larger_move and history.days_since_larger_move >= 14:
+        word = "compression" if compressing else "widening" if widening else "move"
+        return f"Largest spread {word} in {history.days_since_larger_move} days."
+    if compressing:
+        return "Cross-exchange arb gap compressed."
+    if widening:
+        return "Cross-exchange arb gap widened."
+    return None
+
+
+def _exchange_spread_takeaway(alert: AlertTrigger) -> str:
+    if alert.prev_value is not None and alert.value < alert.prev_value:
+        return "Fragmentation easing — watch basis and follow-through."
+    if alert.prev_value is not None and alert.value > alert.prev_value:
+        return "Fragmentation rising — arb stress on watch."
+    return _takeaway_line(alert)
+
+
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
     if alert.indicator.endswith("_liquidations"):
         return _data_lines_for_liquidation(alert, history)
+    if alert.indicator.endswith("_exchange_spread"):
+        return _data_lines_for_exchange_spread(alert, history)
     lines = [_format_value(alert)]
     if alert.alert_unit == "percent" and alert.prev_value is not None:
         pct = abs(history.pct_change or alert.magnitude_pct)
         if pct > 0:
-            lines.append(_format_pct_line(pct, up=_direction_up(alert)))
+            lines[0] = f"{lines[0]} ({_format_pct_line(pct, up=_direction_up(alert))})"
     elif alert.alert_unit == "absolute" and alert.prev_value is not None:
-        bps = abs(history.abs_change) * 100
-        if bps >= 0.01:
+        if alert.indicator.endswith("_basis"):
+            delta = history.abs_change
             sign = "+" if _direction_up(alert) else "-"
-            move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
-            lines.append(f"{sign}{move}")
+            lines[0] = f"{lines[0]} ({sign}{abs(delta):.1f} bps vs prior)"
+        else:
+            bps = abs(history.abs_change) * 100
+            if bps >= 0.01:
+                sign = "+" if _direction_up(alert) else "-"
+                move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
+                lines[0] = f"{lines[0]} ({sign}{move})"
     return lines
 
 
@@ -366,20 +416,34 @@ def _cross_sections(
 def _multi_data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
     if _is_key_level_cross(alert):
         return [_format_value(alert)]
+    if alert.indicator.endswith("_exchange_spread"):
+        short = _exchange_spread_headline(alert)
+        val = _format_value(alert)
+        line = f"{short} {val}"
+        if alert.prev_value is not None:
+            pct = abs(history.pct_change or alert.magnitude_pct)
+            if pct > 0:
+                line += f" ({_format_pct_line(pct, up=_direction_up(alert))})"
+        return [line]
     short = _headline_name(alert, major=False)
     val = _format_value(alert)
-    lines = [f"{short} {val}"]
+    line = f"{short} {val}"
     if alert.prev_value is not None and alert.alert_unit == "percent":
         pct = abs(history.pct_change or alert.magnitude_pct)
         if pct > 0:
-            lines.append(_format_pct_line(pct, up=_direction_up(alert)))
+            line += f" ({_format_pct_line(pct, up=_direction_up(alert))})"
     elif alert.prev_value is not None and alert.alert_unit == "absolute":
-        bps = abs(history.abs_change) * 100
-        if bps >= 0.01:
+        if alert.indicator.endswith("_basis"):
+            delta = history.abs_change
             sign = "+" if _direction_up(alert) else "-"
-            move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
-            lines.append(f"{sign}{move}")
-    return lines
+            line += f" ({sign}{abs(delta):.1f} bps vs prior)"
+        else:
+            bps = abs(history.abs_change) * 100
+            if bps >= 0.01:
+                sign = "+" if _direction_up(alert) else "-"
+                move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
+                line += f" ({sign}{move})"
+    return [line]
 
 
 def _is_standout(alert: AlertTrigger, history: MoveHistory, posting_cfg: dict[str, Any], *, is_emergency: bool) -> bool:
@@ -481,6 +545,23 @@ def _template_macro_release(
     )
 
 
+def _template_exchange_spread(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
+    return _assemble_tweet(
+        headline=f"{emoji}{_exchange_spread_headline(alert)}".strip(),
+        data_lines=_data_lines_for_exchange_spread(alert, history),
+        context=_exchange_spread_context(alert, history),
+        takeaway=_exchange_spread_takeaway(alert),
+    )
+
+
 def _template_liquidation(
     alert: AlertTrigger,
     history: MoveHistory,
@@ -529,6 +610,9 @@ def _pick_single_template(
 ) -> str:
     if alert.indicator.endswith("_liquidations"):
         return _template_liquidation(alert, history, posting_cfg, is_emergency=is_emergency)
+
+    if alert.indicator.endswith("_exchange_spread"):
+        return _template_exchange_spread(alert, history, posting_cfg, is_emergency=is_emergency)
 
     if is_emergency or alert.alert_tier == "emergency":
         return _template_major_move(alert, history, posting_cfg, is_emergency=True)
