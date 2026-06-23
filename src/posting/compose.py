@@ -166,10 +166,6 @@ def _format_value(alert: AlertTrigger) -> str:
     return f"{v:.1f}"
 
 
-def _tier_label(tier: str) -> str:
-    return {"normal": "notable", "major": "major", "emergency": "historic"}[tier]
-
-
 def _direction_up(alert: AlertTrigger) -> bool:
     if alert.prev_value is None:
         return True
@@ -183,6 +179,62 @@ def _cross_direction(alert: AlertTrigger) -> str | None:
         if "crossed below" in reason:
             return "below"
     return None
+
+
+def _is_cross_only(alert: AlertTrigger) -> bool:
+    is_move_rule = any(r in ("percent_change", "absolute_change") for r in alert.rule_types)
+    is_cross_rule = any(r in ("crosses_above", "crosses_below") for r in alert.rule_types)
+    return is_cross_rule and not is_move_rule
+
+
+def _cross_context_line(alert: AlertTrigger) -> str | None:
+    direction = _cross_direction(alert)
+    if not direction:
+        return None
+    if alert.indicator == "yield_curve":
+        return "Uninverted." if direction == "above" else "Inverted."
+    bound = next((r.split()[-1] for r in alert.reasons if "crossed" in r), None)
+    if bound:
+        word = "above" if direction == "above" else "below"
+        return f"Crossed {word} {bound}."
+    return "Key level break."
+
+
+def _major_for_headline(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> bool:
+    standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
+    is_move_rule = any(r in ("percent_change", "absolute_change") for r in alert.rule_types)
+    if history.is_all_time_high and not is_move_rule:
+        return True
+    if _is_cross_only(alert):
+        return standout
+    return is_emergency or alert.alert_tier == "emergency" or (
+        standout and (alert.standalone_major or alert.score >= float(posting_cfg.get("high_single_threshold", 85)))
+    )
+
+
+def _multi_data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    if _is_cross_only(alert):
+        return [_format_value(alert)]
+    short = _headline_name(alert, major=False)
+    val = _format_value(alert)
+    lines = [f"{short} {val}"]
+    if alert.prev_value is not None and alert.alert_unit == "percent":
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            lines.append(_format_pct_line(pct, up=_direction_up(alert)))
+    elif alert.prev_value is not None and alert.alert_unit == "absolute":
+        bps = abs(history.abs_change) * 100
+        if bps >= 0.01:
+            sign = "+" if _direction_up(alert) else "-"
+            move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
+            lines.append(f"{sign}{move}")
+    return lines
 
 
 def _is_standout(alert: AlertTrigger, history: MoveHistory, posting_cfg: dict[str, Any], *, is_emergency: bool) -> bool:
@@ -269,22 +321,10 @@ def _template_cross(
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
     headline = _headline_for_alert(alert, major=standout, emoji=emoji)
-    data_lines = [_format_value(alert)]
-
-    if alert.indicator == "yield_curve":
-        context = "Uninverted." if direction == "above" else "Inverted."
-    else:
-        bound = next((r.split()[-1] for r in alert.reasons if "crossed" in r), None)
-        if bound:
-            word = "above" if direction == "above" else "below"
-            context = f"Crossed {word} {bound}."
-        else:
-            context = "Key level break."
-
     return _assemble_tweet(
         headline=headline,
-        data_lines=data_lines,
-        context=context,
+        data_lines=[_format_value(alert)],
+        context=_cross_context_line(alert),
         takeaway=_takeaway_line(alert),
     )
 
@@ -316,11 +356,10 @@ def _template_major_move(
     is_emergency: bool,
 ) -> str:
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
-    major = is_emergency or alert.alert_tier == "emergency" or (
-        standout and (alert.standalone_major or alert.score >= float(posting_cfg.get("high_single_threshold", 85)))
-    )
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
-    headline = _headline_for_alert(alert, major=major, emoji=emoji)
+    headline = _headline_for_alert(
+        alert, major=_major_for_headline(alert, history, posting_cfg, is_emergency=is_emergency), emoji=emoji,
+    )
     data_lines = _data_lines_for_alert(alert, history) if alert.prev_value is not None else [_format_value(alert)]
     return _assemble_tweet(
         headline=headline,
@@ -377,33 +416,26 @@ def compose_multi_tweet(
 ) -> str:
     histories = histories or {}
     posting_cfg = posting_cfg or {}
-    theme = theme or (alerts[0].themes[0] if alerts[0].themes else "markets")
+    if len(alerts) == 1:
+        a = alerts[0]
+        return compose_single_tweet(
+            a,
+            history=histories.get(a.indicator, MoveHistory()),
+            posting_cfg=posting_cfg,
+            is_emergency=is_emergency,
+        )
 
+    theme = theme or (alerts[0].themes[0] if alerts[0].themes else "markets")
     top = max(alerts, key=lambda x: x.score)
     top_hist = histories.get(top.indicator, MoveHistory())
-    standout = _is_standout(top, top_hist, posting_cfg, is_emergency=is_emergency)
-    major = is_emergency or top.alert_tier == "emergency" or (
-        standout and (top.standalone_major or top.score >= float(posting_cfg.get("high_single_threshold", 85)))
-    )
     emoji = _multi_emoji(alerts, histories, posting_cfg, is_emergency=is_emergency)
-    headline = _headline_for_alert(top, major=major, emoji=emoji)
+    headline = _headline_for_alert(
+        top, major=_major_for_headline(top, top_hist, posting_cfg, is_emergency=is_emergency), emoji=emoji,
+    )
 
     data_lines: list[str] = []
     for a in sorted(alerts, key=lambda x: x.score, reverse=True)[:4]:
-        hist = histories.get(a.indicator, MoveHistory())
-        short = _headline_name(a, major=False)
-        val = _format_value(a)
-        data_lines.append(f"{short} {val}")
-        if a.prev_value is not None and a.alert_unit == "percent":
-            pct = abs(hist.pct_change or a.magnitude_pct)
-            if pct > 0:
-                data_lines.append(_format_pct_line(pct, up=_direction_up(a)))
-        elif a.prev_value is not None and a.alert_unit == "absolute":
-            bps = abs(hist.abs_change) * 100
-            if bps >= 0.01:
-                sign = "+" if _direction_up(a) else "-"
-                move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(hist.abs_change):.2f} pp"
-                data_lines.append(f"{sign}{move}")
+        data_lines.extend(_multi_data_lines_for_alert(a, histories.get(a.indicator, MoveHistory())))
 
     implications = {
         "risk_on": "Risk-on across assets.",
@@ -414,9 +446,11 @@ def compose_multi_tweet(
         "tightening_conditions": "Tightening pressure rising.",
         "housing": "Housing indicators diverging.",
     }
+    context = _cross_context_line(top) if _is_cross_only(top) else (_context_line(top, top_hist) or implications.get(theme))
+    takeaway = _takeaway_line(top) if _is_cross_only(top) else "Watch follow-through across the cluster."
     return _assemble_tweet(
         headline=headline,
         data_lines=data_lines,
-        context=_context_line(top, top_hist) or implications.get(theme),
-        takeaway="Watch follow-through across the cluster.",
+        context=context,
+        takeaway=takeaway,
     )
