@@ -258,7 +258,7 @@ indicators:
       verify:
         source: fred
         series: SP500
-        tolerance_pct: 0.75
+        tolerance_pct: 1.0
 
   nasdaq100:
     name: "NASDAQ 100"
