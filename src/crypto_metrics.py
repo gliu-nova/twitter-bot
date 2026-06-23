@@ -139,7 +139,7 @@ def _exchange_spread(kraken_pair: str, coinbase_product: str) -> tuple[float, st
     return spread_bps, _now_ts()
 
 
-def _okx_liquidations(uly: str, *, window_minutes: int) -> tuple[float, str]:
+def _okx_liquidations(uly: str, *, window_minutes: int) -> tuple[float, float, float, str]:
     resp = requests.get(
         f"{OKX_BASE}/public/liquidation-orders",
         params={"instType": "SWAP", "uly": uly, "state": "filled", "limit": 100},
@@ -152,13 +152,31 @@ def _okx_liquidations(uly: str, *, window_minutes: int) -> tuple[float, str]:
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     cutoff = now_ms - window_minutes * 60 * 1000
-    total = 0.0
+    long_usd = 0.0
+    short_usd = 0.0
     for bucket in body.get("data", []):
         for detail in bucket.get("details", []):
             ts = int(detail.get("time") or detail.get("ts") or 0)
-            if ts >= cutoff:
-                total += float(detail["sz"]) * float(detail["bkPx"])
-    return total, _now_ts()
+            if ts < cutoff:
+                continue
+            usd = float(detail["sz"]) * float(detail["bkPx"])
+            pos = (detail.get("posSide") or "").lower()
+            if pos == "long":
+                long_usd += usd
+            elif pos == "short":
+                short_usd += usd
+            elif (detail.get("side") or "").lower() == "sell":
+                long_usd += usd
+            else:
+                short_usd += usd
+    return long_usd + short_usd, long_usd, short_usd, _now_ts()
+
+
+def fetch_liquidation_metric(settings: dict[str, Any]) -> tuple[float, float, float, str]:
+    asset_cfg = _resolve_asset(settings) if settings.get("asset") else {}
+    uly = settings.get("uly") or asset_cfg["okx_uly"]
+    window = int(settings.get("liquidation_window_minutes", 60))
+    return _okx_liquidations(uly, window_minutes=window)
 
 
 def fetch_crypto_metric(settings: dict[str, Any]) -> tuple[float, str]:
@@ -188,9 +206,8 @@ def fetch_crypto_metric(settings: dict[str, Any]) -> tuple[float, str]:
         return _exchange_spread(kraken_pair, coinbase_product)
 
     if source == "okx_liquidations":
-        uly = settings.get("uly") or asset_cfg["okx_uly"]
-        window = int(settings.get("liquidation_window_minutes", 60))
-        return _okx_liquidations(uly, window_minutes=window)
+        total, _, _, ts = fetch_liquidation_metric(settings)
+        return total, ts
 
     raise FetchError(f"Unknown crypto metric source: {source}")
 

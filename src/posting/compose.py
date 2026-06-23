@@ -26,6 +26,9 @@ MACRO_INDICATORS = {
 }
 
 KEY_LEVEL_CROSS_INDICATORS = frozenset({"vix", "yield_curve", "cpi_yoy", "fed_funds"})
+LIQ_LONG_PREFIX = "long_liq_usd:"
+LIQ_SHORT_PREFIX = "short_liq_usd:"
+LIQ_SKEW_THRESHOLD = 0.75
 
 THEME_HEADLINES: dict[str, str] = {
     "risk_on": "Risk-on shift",
@@ -86,6 +89,65 @@ def _format_pct_line(pct: float, *, up: bool) -> str:
     return f"{sign}{mag:.1f}%"
 
 
+def liq_breakdown_tokens(alert: AlertTrigger) -> list[str]:
+    tokens: list[str] = []
+    if alert.liq_long_usd is not None:
+        tokens.append(f"{LIQ_LONG_PREFIX}{alert.liq_long_usd:.0f}")
+    if alert.liq_short_usd is not None:
+        tokens.append(f"{LIQ_SHORT_PREFIX}{alert.liq_short_usd:.0f}")
+    return tokens
+
+
+def hydrate_liq_from_reasons(alert: AlertTrigger) -> None:
+    if alert.liq_long_usd is not None and alert.liq_short_usd is not None:
+        return
+    for reason in alert.reasons:
+        if reason.startswith(LIQ_LONG_PREFIX):
+            alert.liq_long_usd = float(reason.removeprefix(LIQ_LONG_PREFIX))
+        elif reason.startswith(LIQ_SHORT_PREFIX):
+            alert.liq_short_usd = float(reason.removeprefix(LIQ_SHORT_PREFIX))
+
+
+def _format_liq_usd(value: float) -> str:
+    if value >= 1_000_000:
+        return f"${value / 1_000_000:.1f}M"
+    return f"${value:,.0f}"
+
+
+def _liq_breakdown(alert: AlertTrigger) -> tuple[float | None, float | None]:
+    hydrate_liq_from_reasons(alert)
+    return alert.liq_long_usd, alert.liq_short_usd
+
+
+def _liquidation_headline(alert: AlertTrigger) -> str:
+    asset = alert.indicator.split("_")[0].upper()
+    long_usd, short_usd = _liq_breakdown(alert)
+    if long_usd is not None and short_usd is not None:
+        total = long_usd + short_usd
+        if total > 0:
+            long_share = long_usd / total
+            if long_share >= LIQ_SKEW_THRESHOLD:
+                return f"{asset} LONG SQUEEZE"
+            if long_share <= 1 - LIQ_SKEW_THRESHOLD:
+                return f"{asset} SHORT SQUEEZE"
+    return f"{asset} LIQUIDATIONS"
+
+
+def _liquidation_skew_context(alert: AlertTrigger) -> str | None:
+    long_usd, short_usd = _liq_breakdown(alert)
+    if long_usd is None or short_usd is None:
+        return None
+    total = long_usd + short_usd
+    if total <= 0:
+        return None
+    long_share = long_usd / total
+    if long_share >= LIQ_SKEW_THRESHOLD:
+        return "Primarily long liquidations — classic leverage flush."
+    if long_share <= 1 - LIQ_SKEW_THRESHOLD:
+        return "Primarily short liquidations — short squeeze dynamics."
+    return None
+
+
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
     lines = [_format_value(alert)]
     if alert.alert_unit == "percent" and alert.prev_value is not None:
@@ -98,17 +160,22 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
             sign = "+" if _direction_up(alert) else "-"
             move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
             lines.append(f"{sign}{move}")
+    if alert.indicator.endswith("_liquidations"):
+        long_usd, short_usd = _liq_breakdown(alert)
+        if long_usd is not None and short_usd is not None:
+            lines.append(f"Longs: {_format_liq_usd(long_usd)} | Shorts: {_format_liq_usd(short_usd)}")
     return lines
 
 
 def _headline_name(alert: AlertTrigger, *, major: bool) -> str:
     if alert.indicator.endswith("_liquidations"):
-        asset = alert.indicator.split("_")[0].upper()
-        return f"{asset} Liquidations (1H)" if major else f"{asset} LIQUIDATIONS"
+        return _liquidation_headline(alert)
     return _display_name(alert)
 
 
 def _headline_for_alert(alert: AlertTrigger, *, major: bool, emoji: str) -> str:
+    if alert.indicator.endswith("_liquidations"):
+        return f"{emoji}{_liquidation_headline(alert)}".strip()
     name = _headline_name(alert, major=major)
     body = f"MAJOR MOVE: {name}" if major else name
     return f"{emoji}{body}".strip()
@@ -130,6 +197,8 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
         return "Largest move of the year."
     if alert.alert_tier == "emergency":
         return "Historic spike."
+    if alert.indicator.endswith("_liquidations"):
+        return _liquidation_skew_context(alert)
     return None
 
 

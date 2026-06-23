@@ -72,8 +72,15 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             errors += 1
             continue
 
+        liq_long_usd: float | None = None
+        liq_short_usd: float | None = None
         try:
-            value, observed_at = fetch_indicator(settings)
+            if settings.get("source") == "okx_liquidations":
+                from src.crypto_metrics import fetch_liquidation_metric
+
+                value, liq_long_usd, liq_short_usd, observed_at = fetch_liquidation_metric(settings)
+            else:
+                value, observed_at = fetch_indicator(settings)
         except FetchError as e:
             print(f"[{key}] fetch failed: {e}", file=sys.stderr)
             errors += 1
@@ -94,6 +101,10 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
 
         if not should_alert or not alert:
             continue
+
+        if liq_long_usd is not None and liq_short_usd is not None:
+            alert.liq_long_usd = liq_long_usd
+            alert.liq_short_usd = liq_short_usd
 
         try:
             skip = run_quality_checks(settings, value, observed_at, for_alert=True)

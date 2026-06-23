@@ -23,6 +23,8 @@ class AlertTrigger:
     alert_unit: str = "percent"
     alert_tier: str = "normal"  # normal | major | emergency
     standalone_major: bool = False
+    liq_long_usd: float | None = None
+    liq_short_usd: float | None = None
 
 
 @dataclass

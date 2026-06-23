@@ -19,7 +19,7 @@ from src.db import (
     record_post,
 )
 from src.posting.charts import chart_for_decision
-from src.posting.compose import compose_multi_tweet, compose_single_tweet
+from src.posting.compose import compose_multi_tweet, compose_single_tweet, hydrate_liq_from_reasons, liq_breakdown_tokens
 from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
 from src.posting.grouping import filter_stale_alerts
@@ -33,7 +33,7 @@ ET = ZoneInfo("America/New_York")
 def _row_to_alert(row: sqlite3.Row, cfg: dict[str, Any]) -> AlertTrigger:
     key = row["indicator"]
     settings = indicator_settings(cfg, key)
-    return AlertTrigger(
+    alert = AlertTrigger(
         indicator=key,
         name=settings.get("name", key),
         value=float(row["value"]),
@@ -46,7 +46,10 @@ def _row_to_alert(row: sqlite3.Row, cfg: dict[str, Any]) -> AlertTrigger:
         timestamp=datetime.fromisoformat(row["triggered_at"]),
         score=float(row["score"]),
         db_id=int(row["id"]),
+        standalone_major=bool(settings.get("standalone_major")),
     )
+    hydrate_liq_from_reasons(alert)
+    return alert
 
 
 def _should_flush_macro(now: datetime | None = None) -> bool:
@@ -175,13 +178,17 @@ def enqueue_alert(
         print(f"[queue] {alert.indicator} rejected: stale alert")
         return 0
     alert.score = score
+    reasons = list(alert.reasons)
+    for token in liq_breakdown_tokens(alert):
+        if token not in reasons:
+            reasons.append(token)
 
     alert_id = insert_pending_alert(
         conn,
         indicator=alert.indicator,
         value=alert.value,
         prev_value=alert.prev_value,
-        reasons=alert.reasons,
+        reasons=reasons,
         rule_types=alert.rule_types,
         themes=alert.themes,
         category=alert.category,
