@@ -1,11 +1,9 @@
 name: Twitter Bot
 
 on:
-  # Primary: external cron → workflow_dispatch (see scripts/EXTERNAL_CRON.md).
-  # Backup: native schedule (best-effort; may delay hours during GitHub load).
-  schedule:
-    # :31 past each hour UTC — 9:31 AM ET aligns with US cash open (9:30 ET).
-    - cron: "31 * * * *"
+  # Hourly at :31 UTC via external cron → workflow_dispatch (scripts/EXTERNAL_CRON.md).
+  # Native schedule removed: GitHub cron is best-effort and was firing 15–30+ min late,
+  # causing duplicate runs alongside the external trigger.
   workflow_dispatch:
     inputs:
       source:
@@ -36,11 +34,14 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Restore SQLite state
-        uses: actions/cache@v5
+        id: cache-db
+        uses: actions/cache/restore@v5
         with:
           path: data
-          key: bot-data-v1
-          restore-keys: bot-data-v1
+          key: bot-data-v2-${{ github.run_id }}
+          restore-keys: |
+            bot-data-v2-
+            bot-data-v1
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -72,3 +73,27 @@ jobs:
           TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
           DRY_RUN: "0"
         run: python run.py
+
+      - name: Log SQLite state
+        if: always()
+        run: |
+          if [[ -f data/indicators.db ]]; then
+            echo "indicators.db size: $(wc -c < data/indicators.db) bytes"
+            python - <<'PY'
+          import sqlite3
+          conn = sqlite3.connect("data/indicators.db")
+          readings = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
+          posts = conn.execute("SELECT COUNT(*) FROM post_log").fetchone()[0]
+          pending = conn.execute("SELECT COUNT(*) FROM pending_alerts WHERE processed = 0").fetchone()[0]
+          print(f"readings={readings} posts={posts} pending_alerts={pending}")
+          PY
+          else
+            echo "indicators.db missing"
+          fi
+
+      - name: Save SQLite state
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: data
+          key: bot-data-v2-${{ github.run_id }}

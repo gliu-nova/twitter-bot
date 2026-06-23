@@ -173,7 +173,7 @@ Do **not** commit `.env` to git.
 3. Select **Twitter Bot** workflow
 4. Click **Run workflow** once to test manually
 
-**Primary:** set up external hourly dispatch — see [`scripts/EXTERNAL_CRON.md`](scripts/EXTERNAL_CRON.md) (cron-job.org → `workflow_dispatch`). **Backup:** native cron every hour at `:31` in `.github/workflows/bot.yml` (may delay during GitHub load).
+**Required:** set up external hourly dispatch — see [`scripts/EXTERNAL_CRON.md`](scripts/EXTERNAL_CRON.md) (cron-job.org → `workflow_dispatch` every hour at `:31` UTC).
 
 #### Step 3 — Verify
 
@@ -219,7 +219,7 @@ python run.py --health   # API health only
 
 ## Polling schedule
 
-GitHub Actions **ticks every hour** (external cron primary, native cron backup); each indicator fetches on its own tier when due (posting rules unchanged — still max 2 regular tweets/day + buffer):
+GitHub Actions **ticks every hour** (external cron at `:31` UTC); each indicator fetches on its own tier when due (posting rules unchanged — still max 2 regular tweets/day + buffer):
 
 | Tier | Indicators | Poll interval |
 |------|------------|---------------|

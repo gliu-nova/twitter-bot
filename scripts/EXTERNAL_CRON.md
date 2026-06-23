@@ -1,8 +1,8 @@
 # External hourly trigger (primary scheduler)
 
-GitHub's native `schedule` cron is best-effort and can delay runs by hours. Use an
-external cron service to call `workflow_dispatch` every hour. The workflow still
-keeps `cron: "31 * * * *"` as a backup.
+GitHub's native `schedule` cron is best-effort and can delay runs by 15–30+ minutes,
+which caused duplicate runs when combined with this external trigger. Use only this
+external cron service to call `workflow_dispatch` every hour at :31 UTC.
 
 ## 1. Create a fine-grained PAT
 
@@ -35,7 +35,7 @@ You should see `Dispatched gliu-nova/twitter-bot workflow 299012131`. Check the
 |-------|-------|
 | Title | Twitter Bot hourly |
 | URL | `https://api.github.com/repos/gliu-nova/twitter-bot/actions/workflows/299012131/dispatches` |
-| Schedule | Every hour at **:31** (matches backup cron; 9:31 AM ET ≈ market open) |
+| Schedule | Every hour at **:31 UTC** (9:31 AM ET ≈ market open during EDT) |
 | Request method | **POST** |
 | Request body | `{"ref":"main","inputs":{"source":"external-cron"}}` |
 | Content-Type | `application/json` |
@@ -53,7 +53,7 @@ You should see `Dispatched gliu-nova/twitter-bot workflow 299012131`. Check the
 
 - Actions tab shows hourly `workflow_dispatch` runs with source `external-cron`
 - Log step **Log trigger** prints `source=external-cron`
-- Native `schedule` runs may still appear sporadically as backup (OK if both run — concurrency queues them)
+- Runs should appear once per hour at :31 UTC (`workflow_dispatch`, source `external-cron`)
 
 ## Notes
 
