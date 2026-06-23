@@ -25,7 +25,6 @@ def decide_tweet_type(
         is_emergency = (
             top_alert.alert_tier == "emergency"
             or top_alert.score >= emergency_threshold
-            or top_alert.standalone_major
         )
         return TweetDecision(
             tweet_type="single",

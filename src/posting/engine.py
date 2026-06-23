@@ -71,15 +71,19 @@ def _in_cooldown(
     conn: sqlite3.Connection,
     alert: AlertTrigger,
     posting_cfg: dict[str, Any],
+    cfg: dict[str, Any],
     *,
     is_emergency: bool,
 ) -> bool:
-    if is_emergency:
-        return False
     hours = hours_since_indicator_post(conn, alert.indicator)
     if hours is None:
         return False
-    min_hours = float(posting_cfg.get("indicator_cooldown_hours", 36))
+    settings = indicator_settings(cfg, alert.indicator)
+    indicator_cd = float(settings.get("cooldown_hours", 24))
+    global_cd = float(posting_cfg.get("indicator_cooldown_hours", 36))
+    # Emergency bypasses daily cap and the global 36h cap, but still honors
+    # per-indicator cooldown_hours (e.g. 3h for liquidations).
+    min_hours = indicator_cd if is_emergency else max(indicator_cd, global_cd)
     return hours < min_hours
 
 
@@ -228,7 +232,7 @@ def process_posting_queue(
         filtered = [
             a
             for a in decision.alerts
-            if not _in_cooldown(conn, a, posting_cfg, is_emergency=decision.is_emergency)
+            if not _in_cooldown(conn, a, posting_cfg, cfg, is_emergency=decision.is_emergency)
         ]
         if not filtered:
             print("[posting] all alerts in cooldown — skipping (keeping in queue)")

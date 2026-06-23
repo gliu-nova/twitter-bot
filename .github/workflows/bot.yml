@@ -38,10 +38,18 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: data
-          key: bot-data-v2-${{ github.ref_name }}
+          # Per-run key on save; restore-keys picks up the latest branch cache.
+          key: bot-data-v3-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
+            bot-data-v3-${{ github.ref_name }}-
+            bot-data-v2-${{ github.ref_name }}-
             bot-data-v2-
             bot-data-v1
+
+      - name: Log cache restore
+        run: |
+          echo "cache-hit=${{ steps.cache-db.outputs.cache-hit }}"
+          echo "cache-key=${{ steps.cache-db.outputs.cache-primary-key }}"
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -93,7 +101,7 @@ jobs:
 
       - name: Save SQLite state
         uses: actions/cache/save@v5
-        if: always()
+        if: always() && hashFiles('data/indicators.db') != ''
         with:
           path: data
-          key: bot-data-v2-${{ github.ref_name }}
+          key: bot-data-v3-${{ github.ref_name }}-${{ github.run_id }}

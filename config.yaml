@@ -13,6 +13,8 @@ scheduler:
 # Threshold rules per indicator are still edited under `indicators:` below.
 posting:
   daily_post_cap: 2          # regular posts only; emergencies bypass this cap
+  # indicator_cooldown_hours: global min between posts per indicator (non-emergency).
+  # Emergencies still honor each indicator's cooldown_hours (e.g. 3h for liquidations).
   emergency_threshold: 90
   high_single_threshold: 85
   multi_threshold: 120
