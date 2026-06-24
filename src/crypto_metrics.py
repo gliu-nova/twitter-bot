@@ -6,8 +6,10 @@ from typing import Any
 import requests
 
 from src.fetch import FetchError, _coingecko_latest, _kraken_latest
+from src.quality import QualityError
 
 OKX_BASE = "https://www.okx.com/api/v5"
+BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 HL_INFO = "https://api.hyperliquid.xyz/info"
 COINBASE_BASE = "https://api.coinbase.com/v2/prices"
 
@@ -16,6 +18,7 @@ ASSET_MAP: dict[str, dict[str, str]] = {
         "okx_swap": "BTC-USDT-SWAP",
         "okx_uly": "BTC-USDT",
         "okx_index": "BTC-USDT",
+        "binance_symbol": "BTCUSDT",
         "hl": "BTC",
         "kraken": "XBTUSD",
         "coinbase": "BTC-USD",
@@ -25,6 +28,7 @@ ASSET_MAP: dict[str, dict[str, str]] = {
         "okx_swap": "ETH-USDT-SWAP",
         "okx_uly": "ETH-USDT",
         "okx_index": "ETH-USDT",
+        "binance_symbol": "ETHUSDT",
         "hl": "ETH",
         "kraken": "ETHUSD",
         "coinbase": "ETH-USD",
@@ -34,6 +38,7 @@ ASSET_MAP: dict[str, dict[str, str]] = {
         "okx_swap": "SOL-USDT-SWAP",
         "okx_uly": "SOL-USDT",
         "okx_index": "SOL-USDT",
+        "binance_symbol": "SOLUSDT",
         "hl": "SOL",
         "kraken": "SOLUSD",
         "coinbase": "SOL-USD",
@@ -172,10 +177,51 @@ def _okx_liquidations(uly: str, *, window_minutes: int) -> tuple[float, float, f
     return long_usd + short_usd, long_usd, short_usd, _now_ts()
 
 
+def _binance_liquidations(symbol: str, *, window_minutes: int) -> tuple[float, float, float, str]:
+    try:
+        resp = requests.get(
+            f"{BINANCE_FUTURES_BASE}/fapi/v1/allForceOrders",
+            params={"symbol": symbol, "limit": 100},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+    except requests.RequestException as e:
+        raise FetchError(f"Binance liquidations unavailable for {symbol}: {e}") from e
+    if isinstance(body, dict):
+        raise FetchError(f"Binance liquidations error for {symbol}: {body.get('msg', body)}")
+
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    cutoff = now_ms - window_minutes * 60 * 1000
+    long_usd = 0.0
+    short_usd = 0.0
+    for order in body:
+        ts = int(order.get("time") or 0)
+        if ts < cutoff:
+            continue
+        usd = float(order.get("cumQuote") or 0)
+        if usd <= 0:
+            px = float(order.get("avgPrice") or order.get("price") or 0)
+            qty = float(order.get("executedQty") or order.get("origQty") or 0)
+            usd = px * qty
+        side = (order.get("side") or "").upper()
+        if side == "SELL":
+            long_usd += usd
+        else:
+            short_usd += usd
+    return long_usd + short_usd, long_usd, short_usd, _now_ts()
+
+
 def fetch_liquidation_metric(settings: dict[str, Any]) -> tuple[float, float, float, str]:
-    asset_cfg = _resolve_asset(settings) if settings.get("asset") else {}
-    uly = settings.get("uly") or asset_cfg["okx_uly"]
+    source = settings.get("source", "okx_liquidations")
     window = int(settings.get("liquidation_window_minutes", 60))
+    asset_cfg = _resolve_asset(settings) if settings.get("asset") else {}
+
+    if source == "binance_liquidations":
+        symbol = settings.get("symbol") or asset_cfg["binance_symbol"]
+        return _binance_liquidations(symbol, window_minutes=window)
+
+    uly = settings.get("uly") or asset_cfg["okx_uly"]
     return _okx_liquidations(uly, window_minutes=window)
 
 
@@ -205,11 +251,59 @@ def fetch_crypto_metric(settings: dict[str, Any]) -> tuple[float, str]:
         coinbase_product = settings.get("coinbase_product") or asset_cfg["coinbase"]
         return _exchange_spread(kraken_pair, coinbase_product)
 
-    if source == "okx_liquidations":
+    if source in ("okx_liquidations", "binance_liquidations"):
         total, _, _, ts = fetch_liquidation_metric(settings)
         return total, ts
 
     raise FetchError(f"Unknown crypto metric source: {source}")
+
+
+def verify_liquidation_totals(
+    primary: float,
+    verify_cfg: dict[str, Any],
+    name: str,
+    *,
+    floor_usd: float = 0,
+) -> None:
+    """Cross-check OKX liquidation totals against a second venue.
+
+    Venue totals differ widely, so we use an order-of-magnitude ratio band instead
+    of tight percent matching. Quiet readings below the floor are not verified.
+    """
+    fetch_cfg = {
+        k: v
+        for k, v in verify_cfg.items()
+        if k not in ("tolerance_pct", "min_ratio", "max_ratio", "min_primary_usd")
+    }
+    from src.fetch import fetch_indicator
+
+    try:
+        secondary, _ = fetch_indicator(fetch_cfg)
+    except FetchError as e:
+        print(f"[warn] {name}: cross-verify skipped ({e})")
+        return
+
+    min_primary = verify_cfg.get("min_primary_usd")
+    if min_primary is None and floor_usd > 0:
+        min_primary = floor_usd
+    if min_primary is not None and primary < float(min_primary):
+        return
+
+    if primary == 0:
+        return
+    if secondary == 0:
+        raise QualityError(
+            f"{name}: cross-verify mismatch {primary:g} vs 0 (secondary venue silent)"
+        )
+
+    ratio = primary / secondary
+    min_ratio = float(verify_cfg.get("min_ratio", 0.02))
+    max_ratio = float(verify_cfg.get("max_ratio", 50))
+    if ratio < min_ratio or ratio > max_ratio:
+        raise QualityError(
+            f"{name}: cross-verify failed {primary:g} vs {secondary:g} "
+            f"(ratio {ratio:.2f} outside [{min_ratio:g}, {max_ratio:g}])"
+        )
 
 
 def verify_exchange_spread_mid(settings: dict[str, Any], tolerance_pct: float, name: str) -> None:

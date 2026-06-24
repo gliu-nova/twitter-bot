@@ -583,6 +583,12 @@ indicators:
     emergency_alert: 300
     rules:
       - type: liquidation_spike
+    quality:
+      verify:
+        source: binance_liquidations
+        asset: BTC
+        min_ratio: 0.02
+        max_ratio: 10
 
   eth_liquidations:
     name: "ETH Liquidations (1h)"
@@ -598,6 +604,12 @@ indicators:
     emergency_alert: 300
     rules:
       - type: liquidation_spike
+    quality:
+      verify:
+        source: binance_liquidations
+        asset: ETH
+        min_ratio: 0.02
+        max_ratio: 10
 
   sol_liquidations:
     name: "SOL Liquidations (1h)"
@@ -613,6 +625,12 @@ indicators:
     emergency_alert: 320
     rules:
       - type: liquidation_spike
+    quality:
+      verify:
+        source: binance_liquidations
+        asset: SOL
+        min_ratio: 0.02
+        max_ratio: 10
 
   fed_funds:
     name: "Fed Funds Rate"

@@ -114,6 +114,15 @@ def run_quality_checks(
                 float(verify.get("tolerance_pct", 1.0)),
                 name,
             )
+        elif settings.get("source") == "okx_liquidations":
+            from src.crypto_metrics import verify_liquidation_totals
+
+            verify_liquidation_totals(
+                value,
+                verify,
+                name,
+                floor_usd=float(settings.get("liquidation_floor_usd", 0)),
+            )
         else:
             cross_verify(value, verify, float(verify.get("tolerance_pct", 1.0)), name)
 
