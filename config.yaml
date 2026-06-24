@@ -629,20 +629,26 @@ indicators:
     rules:
       - type: crosses_above
         value: 4.5
+      - type: crosses_above
+        value: 5.0
+      - type: crosses_below
+        value: 4.0
 
   yield_curve:
     name: "Yield Curve (10Y - 2Y)"
     source: fred
     series: T10Y2Y
     alert_unit: absolute
-    normal_alert: 0.15
-    major_alert: 0.25
-    emergency_alert: 0.40
+    normal_alert: 0.20
+    major_alert: 0.30
+    emergency_alert: 0.45
     rules:
       - type: crosses_below
         value: 0
       - type: crosses_above
         value: 0
+      - type: crosses_above
+        value: 0.50
 
   jobless_claims:
     name: "Initial Jobless Claims"
