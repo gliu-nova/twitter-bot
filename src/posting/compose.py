@@ -1344,7 +1344,7 @@ def compose_multi_tweet(
     }
     theme_headline = THEME_HEADLINES.get(theme, "Multi-asset move").upper()
     headline = f"{emoji}{theme_headline}".strip()
-    context = _context_line(top, top_hist) or implications.get(theme, "Cluster stands out vs recent baseline.")
+    context = implications.get(theme) or _context_line(top, top_hist) or "Cluster stands out vs recent baseline."
     return _assemble_tweet(
         headline=headline,
         data_lines=data_lines,
