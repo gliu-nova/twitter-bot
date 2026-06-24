@@ -17,7 +17,8 @@ from src.config import ROOT, indicator_settings
 from src.db import daily_readings_since, liquidation_readings_since, readings_since
 from src.fetch import fetch_chart_history
 from src.scheduler import CRYPTO_KEYS
-from src.posting.compose import THEME_HEADLINES
+from src.posting.compose import THEME_HEADLINES, should_attach_chart
+from src.posting.history import build_move_history
 from src.posting.models import AlertTrigger
 
 CHART_DIR = ROOT / "data" / "charts"
@@ -32,7 +33,9 @@ TEXT = "#f8fafc"
 MUTED = "#94a3b8"
 LONG_LIQ_COLOR = "#ef4444"
 SHORT_LIQ_COLOR = "#22c55e"
-HIGHLIGHT_EDGE = "#f8fafc"
+HIGHLIGHT_EDGE = "#fbbf24"
+HIGHLIGHT_FILL = "#fde68a"
+HISTORY_ALPHA = 0.42
 
 SHORT_NAMES: dict[str, str] = {
     "btc": "BTC",
@@ -266,6 +269,28 @@ def _configure_x_axis(ax, dates: list[datetime]) -> None:
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right")
 
 
+def _annotate_latest(ax, x: float, y: float, *, color: str = HIGHLIGHT_EDGE) -> None:
+    ax.annotate(
+        "LATEST",
+        xy=(x, y),
+        xytext=(0, 14),
+        textcoords="offset points",
+        ha="center",
+        va="bottom",
+        color=color,
+        fontsize=10,
+        fontweight="bold",
+        bbox={
+            "boxstyle": "round,pad=0.25",
+            "facecolor": BG,
+            "edgecolor": color,
+            "linewidth": 1.5,
+            "alpha": 0.95,
+        },
+        zorder=8,
+    )
+
+
 def _save_fig(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(path, dpi=100, bbox_inches="tight", facecolor=BG, edgecolor="none")
@@ -301,8 +326,50 @@ def render_line_chart(
 
     fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
     ax.set_facecolor(PANEL)
-    ax.plot(dates, values, color=line_color, linewidth=2.5, label=series_label, marker="o", markersize=4)
-    ax.scatter([dates[-1]], [values[-1]], color=line_color, s=120, zorder=5, edgecolors=HIGHLIGHT_EDGE, linewidths=1.5)
+
+    if len(dates) >= 3:
+        ax.plot(
+            dates[:-1],
+            values[:-1],
+            color=line_color,
+            linewidth=2.0,
+            alpha=HISTORY_ALPHA,
+            marker="o",
+            markersize=3,
+            zorder=2,
+        )
+        ax.plot(
+            dates[-2:],
+            values[-2:],
+            color=line_color,
+            linewidth=3.0,
+            marker="o",
+            markersize=5,
+            label=series_label,
+            zorder=3,
+        )
+    else:
+        ax.plot(
+            dates,
+            values,
+            color=line_color,
+            linewidth=2.5,
+            label=series_label,
+            marker="o",
+            markersize=4,
+            zorder=3,
+        )
+
+    ax.scatter(
+        [dates[-1]],
+        [values[-1]],
+        color=HIGHLIGHT_FILL,
+        s=220,
+        zorder=6,
+        edgecolors=HIGHLIGHT_EDGE,
+        linewidths=3.0,
+    )
+    _annotate_latest(ax, mdates.date2num(dates[-1]), values[-1])
 
     data_hi = max(values)
     data_lo = min(values)
@@ -369,25 +436,29 @@ def render_liquidation_chart(
     fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
     ax.set_facecolor(PANEL)
 
-    ax.bar(
-        x_pos,
-        long_vals,
-        width=bar_width,
-        color=LONG_LIQ_COLOR,
-        label="Long liquidations",
-        alpha=0.92,
-        edgecolor="none",
-    )
-    ax.bar(
-        x_pos,
-        short_vals,
-        width=bar_width,
-        bottom=long_vals,
-        color=SHORT_LIQ_COLOR,
-        label="Short liquidations",
-        alpha=0.92,
-        edgecolor="none",
-    )
+    hist_x = x_pos[:-1] if len(x_pos) > 1 else []
+    if hist_x:
+        ax.bar(
+            hist_x,
+            long_vals[:-1],
+            width=bar_width,
+            color=LONG_LIQ_COLOR,
+            label="Long liquidations",
+            alpha=HISTORY_ALPHA,
+            edgecolor="none",
+            zorder=2,
+        )
+        ax.bar(
+            hist_x,
+            short_vals[:-1],
+            width=bar_width,
+            bottom=long_vals[:-1],
+            color=SHORT_LIQ_COLOR,
+            label="Short liquidations",
+            alpha=HISTORY_ALPHA,
+            edgecolor="none",
+            zorder=2,
+        )
 
     last_idx = len(dates) - 1
     ax.bar(
@@ -396,8 +467,8 @@ def render_liquidation_chart(
         width=bar_width,
         color=LONG_LIQ_COLOR,
         edgecolor=HIGHLIGHT_EDGE,
-        linewidth=2.0,
-        zorder=4,
+        linewidth=3.5,
+        zorder=5,
     )
     ax.bar(
         [x_pos[last_idx]],
@@ -406,18 +477,19 @@ def render_liquidation_chart(
         bottom=[long_vals[last_idx]],
         color=SHORT_LIQ_COLOR,
         edgecolor=HIGHLIGHT_EDGE,
-        linewidth=2.0,
-        zorder=4,
+        linewidth=3.5,
+        zorder=5,
     )
     ax.scatter(
         [x_pos[last_idx]],
         [totals[last_idx]],
-        color=HIGHLIGHT_EDGE,
-        s=90,
-        zorder=6,
-        edgecolors=BG,
-        linewidths=1.5,
+        color=HIGHLIGHT_FILL,
+        s=200,
+        zorder=7,
+        edgecolors=HIGHLIGHT_EDGE,
+        linewidths=3.0,
     )
+    _annotate_latest(ax, x_pos[last_idx], totals[last_idx])
 
     data_hi = max(totals)
     data_lo = min(totals)
@@ -494,13 +566,19 @@ def chart_for_decision(
     alerts: list[AlertTrigger],
     theme: str | None,
     is_emergency: bool,
+    posting_cfg: dict[str, Any] | None = None,
 ) -> Path | None:
+    posting_cfg = posting_cfg or cfg.get("posting") or {}
     if tweet_type == "multi":
         return render_multi_card(alerts, theme)
-    if len(alerts) == 1:
-        alert = alerts[0]
-        if alert.indicator.endswith("_liquidations"):
-            return render_liquidation_chart(conn, alert, cfg)
-        if is_emergency:
-            return render_line_chart(conn, alert, cfg)
-    return None
+    if len(alerts) != 1:
+        return None
+
+    alert = alerts[0]
+    history = build_move_history(conn, alert)
+    if not should_attach_chart(alert, history, posting_cfg, is_emergency=is_emergency):
+        return None
+
+    if alert.indicator.endswith("_liquidations"):
+        return render_liquidation_chart(conn, alert, cfg)
+    return render_line_chart(conn, alert, cfg)

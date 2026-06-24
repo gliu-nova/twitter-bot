@@ -763,6 +763,57 @@ def compose_single_tweet(
     return _pick_single_template(alert, history, posting_cfg, is_emergency=is_emergency)
 
 
+CHART_ALWAYS_SUFFIXES = ("_liquidations", "_basis", "_exchange_spread")
+VOLATILITY_INDICATORS = frozenset({"vix", "move"})
+
+
+def is_text_only_alert(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> bool:
+    """Text-only posts (~0–20%): simple flips, breaking macro headlines, fast level updates."""
+    if is_emergency or alert.alert_tier in ("emergency", "major"):
+        return False
+    if alert.indicator.endswith(CHART_ALWAYS_SUFFIXES):
+        return False
+    if alert.indicator in VOLATILITY_INDICATORS:
+        return False
+    if any(r in ("percent_change", "absolute_change", "liquidation_spike") for r in alert.rule_types):
+        return False
+
+    level_rules = frozenset({"above", "below", "crosses_above", "crosses_below"})
+    if not alert.rule_types or not all(r in level_rules for r in alert.rule_types):
+        return False
+
+    if alert.indicator.endswith("_funding") or alert.indicator == "fear_greed":
+        return True
+
+    if alert.is_macro or alert.indicator in MACRO_INDICATORS:
+        return True
+
+    if alert.indicator in KEY_LEVEL_CROSS_INDICATORS:
+        return True
+
+    if all(r in ("above", "below") for r in alert.rule_types):
+        return True
+
+    return False
+
+
+def should_attach_chart(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> bool:
+    """Default: attach a chart (target 80–100% of posts)."""
+    return not is_text_only_alert(alert, history, posting_cfg, is_emergency=is_emergency)
+
+
 def compose_multi_tweet(
     alerts: list[AlertTrigger],
     theme: str | None = None,

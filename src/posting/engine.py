@@ -20,7 +20,13 @@ from src.db import (
     record_post,
 )
 from src.posting.charts import chart_for_decision
-from src.posting.compose import compose_multi_tweet, compose_single_tweet, hydrate_liq_from_reasons, liq_breakdown_tokens
+from src.posting.compose import (
+    compose_multi_tweet,
+    compose_single_tweet,
+    hydrate_liq_from_reasons,
+    liq_breakdown_tokens,
+    should_attach_chart,
+)
 from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
 from src.posting.grouping import filter_stale_alerts
@@ -360,9 +366,15 @@ def process_posting_queue(
             alerts=decision.alerts,
             theme=decision.theme,
             is_emergency=decision.is_emergency,
+            posting_cfg=posting_cfg,
         )
         if chart_path:
             print(f"[posting] chart: {chart_path}")
+        elif decision.tweet_type == "single":
+            alert = decision.alerts[0]
+            history = build_move_history(conn, alert)
+            if not should_attach_chart(alert, history, posting_cfg, is_emergency=decision.is_emergency):
+                print(f"[posting] text-only — no chart ({alert.indicator})")
 
         print(f"[posting] {decision.tweet_type} score={decision.score} emergency={decision.is_emergency}")
         post_tweet(text, media_path=chart_path)
