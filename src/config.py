@@ -47,7 +47,6 @@ def _source_quality_defaults(source: str) -> dict[str, Any]:
         "hyperliquid_basis",
         "exchange_spread",
         "okx_liquidations",
-        "binance_liquidations",
     ):
         return {"schedule": "crypto_24_7", "max_stale_hours": 2}
     if source == "yahoo":

@@ -263,7 +263,6 @@ def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
         "hyperliquid_basis",
         "exchange_spread",
         "okx_liquidations",
-        "binance_liquidations",
     ):
         from src.crypto_metrics import fetch_crypto_metric
 
