@@ -16,6 +16,17 @@ from src.scheduler import interval_label, is_fetch_due
 from src.validate import run_validate
 
 
+def _skip_reason_from_error(exc: Exception) -> str:
+    msg = str(exc)
+    if "cross-verify" in msg:
+        return "cross-verify mismatch"
+    if "stale" in msg:
+        return "stale data"
+    if isinstance(exc, FetchError):
+        return "fetch error"
+    return "quality check"
+
+
 def _source_for_health(source: str) -> str:
     if source in ("fred", "fred_cpi_yoy"):
         return "fred"
@@ -48,15 +59,16 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
 
     conn = connect()
     keys = [only] if only else list(cfg["indicators"].keys())
-    errors = 0
+    skipped_indicators: list[tuple[str, str, str]] = []
     skipped_alerts = 0
     queued = 0
     skipped_fetch = 0
 
     for key in keys:
         if key not in cfg["indicators"]:
-            print(f"Unknown indicator: {key}", file=sys.stderr)
-            errors += 1
+            detail = "unknown indicator key in config"
+            print(f"[{key}] skipped ({detail})", file=sys.stderr)
+            skipped_indicators.append((key, "config error", detail))
             continue
         settings = indicator_settings(cfg, key)
         force_fetch = only is not None
@@ -69,8 +81,9 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
         health_msg = health.get(src_health, "")
         api_ok = health_msg == "ok"
         if not api_ok:
-            print(f"[{key}] skipped: API unhealthy ({src_health})", file=sys.stderr)
-            errors += 1
+            detail = f"API unhealthy ({src_health}: {health_msg})"
+            print(f"[{key}] skipped ({detail})", file=sys.stderr)
+            skipped_indicators.append((key, "API unhealthy", detail))
             continue
 
         liq_long_usd: float | None = None
@@ -83,26 +96,44 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             else:
                 value, observed_at = fetch_indicator(settings)
         except FetchError as e:
-            print(f"[{key}] fetch failed: {e}", file=sys.stderr)
-            errors += 1
+            reason = _skip_reason_from_error(e)
+            print(f"[{key}] skipped ({reason}): {e}", file=sys.stderr)
+            skipped_indicators.append((key, reason, str(e)))
             continue
 
         try:
             run_quality_checks(settings, value, observed_at, for_alert=False)
         except QualityError as e:
-            print(f"[{key}] quality rejected: {e}", file=sys.stderr)
-            errors += 1
+            reason = _skip_reason_from_error(e)
+            print(f"[{key}] skipped ({reason}): {e}", file=sys.stderr)
+            skipped_indicators.append((key, reason, str(e)))
             continue
         except FetchError as e:
-            print(f"[{key}] quality rejected: {e}", file=sys.stderr)
-            errors += 1
+            reason = _skip_reason_from_error(e)
+            print(f"[{key}] skipped ({reason}): {e}", file=sys.stderr)
+            skipped_indicators.append((key, reason, str(e)))
             continue
 
         label = interval_label(settings, cfg)
         print(f"[{key}] {settings['name']}: {value:g} ({observed_at}) [poll every {label}]")
 
-        should_alert, alert = check_alert(conn, settings, value)
-        save_reading(conn, key, value, observed_at)
+        if settings.get("source") == "okx_liquidations":
+            from src.liquidations import check_liquidation_alert
+
+            should_alert, alert = check_liquidation_alert(
+                conn, settings, value, liq_long_usd or 0.0, liq_short_usd or 0.0
+            )
+            save_reading(
+                conn,
+                key,
+                value,
+                observed_at,
+                liq_long_usd=liq_long_usd,
+                liq_short_usd=liq_short_usd,
+            )
+        else:
+            should_alert, alert = check_alert(conn, settings, value)
+            save_reading(conn, key, value, observed_at)
 
         if not should_alert or not alert:
             continue
@@ -148,8 +179,13 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     conn.close()
     if skipped_alerts:
         print(f"Alerts suppressed: {skipped_alerts}")
-    if errors:
-        print(f"Warning: {errors} indicator error(s) — run completed (non-fatal)")
+    if skipped_indicators:
+        print(
+            f"Note: {len(skipped_indicators)} indicator(s) skipped this run "
+            "(non-fatal — other indicators and posting still ran):"
+        )
+        for key, reason, detail in skipped_indicators:
+            print(f"  • {key}: {reason} — {detail}")
     # Partial indicator failures should not fail the scheduler (exit 0).
     return 0
 

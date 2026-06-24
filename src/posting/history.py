@@ -36,6 +36,7 @@ class MoveHistory:
     is_largest_ytd: bool = False
     ytd_move_count: int = 0
     level_extreme: str | None = None
+    liquidation_rank: str | None = None
 
 
 def _daily_closes(conn: sqlite3.Connection, indicator: str) -> list[tuple[str, float]]:
@@ -89,6 +90,10 @@ def _apply_level_extreme(
 
 def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHistory:
     history = MoveHistory()
+    if alert.indicator.endswith("_liquidations"):
+        from src.liquidations import liquidation_rank_phrase
+
+        history.liquidation_rank = liquidation_rank_phrase(conn, alert.indicator, alert.value)
     if alert.prev_value is None:
         return history
 

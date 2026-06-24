@@ -1,24 +1,28 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import sqlite3
 
 from src.config import ROOT, indicator_settings
-from src.db import daily_readings_since
+from src.db import daily_readings_since, liquidation_readings_since, readings_since
 from src.fetch import fetch_chart_history
+from src.scheduler import CRYPTO_KEYS
 from src.posting.compose import THEME_HEADLINES
 from src.posting.models import AlertTrigger
 
 CHART_DIR = ROOT / "data" / "charts"
 MAX_BYTES = 2 * 1024 * 1024
+ET = ZoneInfo("America/New_York")
 
 GREEN = "#22c55e"
 RED = "#ef4444"
@@ -26,7 +30,9 @@ BG = "#0f172a"
 PANEL = "#1e293b"
 TEXT = "#f8fafc"
 MUTED = "#94a3b8"
-THRESHOLD_COLOR = "#f59e0b"
+LONG_LIQ_COLOR = "#ef4444"
+SHORT_LIQ_COLOR = "#22c55e"
+HIGHLIGHT_EDGE = "#f8fafc"
 
 SHORT_NAMES: dict[str, str] = {
     "btc": "BTC",
@@ -103,26 +109,127 @@ def _format_move(alert: AlertTrigger) -> str:
     return f"{sign}{pct:.1f}%"
 
 
-def _threshold_levels(settings: dict[str, Any], alert: AlertTrigger) -> list[tuple[float, str]]:
-    levels: list[tuple[float, str]] = []
-    for rule in settings.get("rules") or []:
-        rtype = rule.get("type")
-        if rtype in ("crosses_above", "crosses_below", "above", "below"):
-            val = float(rule["value"])
-            label = f"Threshold {val:g}"
-            levels.append((val, label))
+def _parse_chart_date(ts: str) -> datetime:
+    if ts.isdigit():
+        return datetime.fromtimestamp(int(ts), timezone.utc)
+    if "T" in ts:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if len(ts) >= 16 and ts[10] == " ":
+        return datetime.strptime(ts[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+    return datetime.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
-    if not levels and alert.prev_value is not None:
-        normal = settings.get("normal_alert")
-        if normal is not None:
-            normal = float(normal)
-            if alert.alert_unit == "absolute":
-                levels.append((alert.prev_value + normal, f"+{normal:g} trigger"))
-                levels.append((alert.prev_value - normal, f"-{normal:g} trigger"))
-            else:
-                levels.append((alert.prev_value * (1 + normal / 100), f"+{normal:g}% trigger"))
-                levels.append((alert.prev_value * (1 - normal / 100), f"-{normal:g}% trigger"))
-    return levels
+
+def _to_et(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ET)
+
+
+def _use_intraday_history(alert: AlertTrigger, settings: dict[str, Any]) -> bool:
+    if alert.indicator in CRYPTO_KEYS:
+        return True
+    return settings.get("source") in (
+        "okx_funding",
+        "hyperliquid_funding",
+        "okx_basis",
+        "hyperliquid_basis",
+        "exchange_spread",
+        "okx_liquidations",
+    )
+
+
+def _chart_history(
+    conn: sqlite3.Connection,
+    alert: AlertTrigger,
+    settings: dict[str, Any],
+    *,
+    months: int,
+) -> list[tuple[str, float]]:
+    if _use_intraday_history(alert, settings):
+        return readings_since(conn, alert.indicator, months=months)
+    return daily_readings_since(conn, alert.indicator, months=months)
+
+
+def _format_chart_value(alert: AlertTrigger, value: float) -> str:
+    if alert.indicator.endswith("_liquidations"):
+        if value >= 1_000_000:
+            return f"${value / 1_000_000:.1f}M"
+        if value >= 1_000:
+            return f"${value / 1_000:.0f}K"
+        return f"${value:,.0f}"
+    if alert.indicator.endswith("_funding"):
+        return f"{value * 100:.4f}%"
+    if alert.indicator.endswith(("_basis", "_exchange_spread")):
+        return f"{value:.1f} bps"
+    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
+        return f"{value:.2f}%"
+    if value >= 1000:
+        return f"${value:,.0f}"
+    return f"{value:g}"
+
+
+def _y_axis_label(alert: AlertTrigger) -> str:
+    if alert.indicator.endswith("_liquidations"):
+        return "1H Liquidations (USD)"
+    if alert.indicator.endswith("_funding"):
+        return "Funding Rate"
+    if alert.indicator.endswith(("_basis", "_exchange_spread")):
+        return "Basis (bps)"
+    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
+        return "Level (%)"
+    return alert.name
+
+
+def _y_tick_formatter(alert: AlertTrigger):
+    def _fmt(value: float, _pos: int) -> str:
+        if alert.indicator.endswith("_liquidations"):
+            if abs(value) >= 1_000_000:
+                return f"${value / 1_000_000:.1f}M"
+            if abs(value) >= 1_000:
+                return f"${value / 1_000:.0f}K"
+            return f"${value:.0f}"
+        if alert.indicator.endswith("_funding"):
+            return f"{value * 100:.3f}%"
+        if abs(value) >= 1000:
+            return f"{value / 1000:.1f}k"
+        return f"{value:g}"
+
+    return FuncFormatter(_fmt)
+
+
+def _chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
+    if len(dates) < 2:
+        return alert.name
+    span = dates[-1] - dates[0]
+    span_hours = max(span.total_seconds() / 3600, 1)
+    if span_hours < 48:
+        return f"{alert.name} — Last {int(span_hours)}h"
+    span_days = max(span.days, 1)
+    if span_days < 14:
+        return f"{alert.name} — Last {span_days}d"
+    if span_days < 120:
+        return f"{alert.name} — Last {span_days // 30 or 1}mo"
+    return f"{alert.name} — 6 Month"
+
+
+def _configure_x_axis(ax, dates: list[datetime]) -> None:
+    if len(dates) < 2:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
+        return
+    span = dates[-1] - dates[0]
+    if span < timedelta(hours=36):
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, int(span.total_seconds() / 3600 / 5)), tz=ET))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d %H:%M", tz=ET))
+    elif span < timedelta(days=14):
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1, tz=ET))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
+    elif span < timedelta(days=120):
+        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1, tz=ET))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
+    else:
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1, tz=ET))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y", tz=ET))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right")
 
 
 def _save_fig(path: Path) -> Path:
@@ -140,51 +247,174 @@ def render_line_chart(
     months: int = 6,
 ) -> Path | None:
     settings = indicator_settings(cfg, alert.indicator)
-    daily = daily_readings_since(conn, alert.indicator, months=months)
-    if len(daily) < 10:
+    series = _chart_history(conn, alert, settings, months=months)
+    if len(series) < 10 and not _use_intraday_history(alert, settings):
         try:
             fetched = fetch_chart_history(settings, months=months)
             if len(fetched) >= 2:
-                daily = fetched
+                series = fetched
         except Exception:
             pass
-    if len(daily) < 2:
+    if len(series) < 2:
         return None
 
-    dates = [datetime.fromisoformat(d) for d, _ in daily]
-    values = [v for _, v in daily]
+    dates = [_to_et(_parse_chart_date(d)) for d, _ in series]
+    values = [v for _, v in series]
 
     up = alert.prev_value is not None and alert.value >= (alert.prev_value or alert.value)
     line_color = GREEN if up else RED
+    series_label = _short_name(alert)
 
     fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
     ax.set_facecolor(PANEL)
-    ax.plot(dates, values, color=line_color, linewidth=2.5, label=_short_name(alert))
-    ax.scatter([dates[-1]], [values[-1]], color=line_color, s=80, zorder=5)
+    ax.plot(dates, values, color=line_color, linewidth=2.5, label=series_label, marker="o", markersize=4)
+    ax.scatter([dates[-1]], [values[-1]], color=line_color, s=120, zorder=5, edgecolors=HIGHLIGHT_EDGE, linewidths=1.5)
 
-    for level, label in _threshold_levels(settings, alert):
-        ax.axhline(level, color=THRESHOLD_COLOR, linestyle="--", linewidth=1.2, alpha=0.85)
-        ax.text(dates[-1], level, f" {label}", color=THRESHOLD_COLOR, fontsize=9, va="bottom")
+    data_hi = max(values)
+    data_lo = min(values)
+    ylim_top = data_hi * 1.2
+    ylim_bottom = 0.0
+    if data_lo > 0 and data_hi / max(data_lo, 1e-9) > 4:
+        ylim_bottom = max(0.0, data_lo * 0.85)
+    ax.set_ylim(ylim_bottom, ylim_top)
 
-    vmin, vmax = min(values), max(values)
-    six_m_hi = max(values)
-    six_m_lo = min(values)
     current = values[-1]
-    ctx = f"Now: {current:g}  |  6M high: {six_m_hi:g}  |  6M low: {six_m_lo:g}"
+    ctx = (
+        f"Now: {_format_chart_value(alert, current)}"
+        f"  |  High: {_format_chart_value(alert, data_hi)}"
+        f"  |  Low: {_format_chart_value(alert, data_lo)}"
+    )
     if alert.prev_value is not None:
-        ch = _format_move(alert)
-        ctx += f"  |  Move: {ch}"
+        ctx += f"  |  Move: {_format_move(alert)}"
 
-    ax.set_title(f"{alert.name} — 6 Month", color=TEXT, fontsize=16, fontweight="bold", pad=16)
+    ax.set_title(_chart_title(alert, dates), color=TEXT, fontsize=16, fontweight="bold", pad=16)
     ax.text(0.5, 1.02, ctx, transform=ax.transAxes, ha="center", color=MUTED, fontsize=10)
+    ax.set_xlabel("Date (ET)", color=MUTED, fontsize=11, labelpad=8)
+    ax.set_ylabel(_y_axis_label(alert), color=MUTED, fontsize=11, labelpad=8)
+    ax.yaxis.set_major_formatter(_y_tick_formatter(alert))
     ax.tick_params(colors=MUTED)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    _configure_x_axis(ax, dates)
+    ax.legend(loc="upper left", framealpha=0.25, facecolor=PANEL, edgecolor="#334155", labelcolor=TEXT)
     for spine in ax.spines.values():
         spine.set_color("#334155")
     ax.grid(True, alpha=0.2, color=MUTED)
 
     fname = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{alert.indicator}_line.png"
+    return _save_fig(CHART_DIR / fname)
+
+
+def render_liquidation_chart(
+    conn: sqlite3.Connection,
+    alert: AlertTrigger,
+    cfg: dict[str, Any],
+    *,
+    days: int = 7,
+) -> Path | None:
+    rows = liquidation_readings_since(conn, alert.indicator, days=days)
+    if len(rows) < 2:
+        rows = [
+            (ts, total, None, None)
+            for ts, total in readings_since(conn, alert.indicator, months=1)
+        ]
+    if len(rows) < 2:
+        return None
+
+    dates = [_to_et(_parse_chart_date(ts)) for ts, _, _, _ in rows]
+    long_vals = [long if long is not None else 0.0 for _, _, long, _ in rows]
+    short_vals = [short if short is not None else 0.0 for _, _, _, short in rows]
+    totals = [total for _, total, _, _ in rows]
+
+    if not any(long_vals) and not any(short_vals):
+        for i, total in enumerate(totals):
+            long_vals[i] = total
+
+    span = dates[-1] - dates[0]
+    if span < timedelta(hours=12):
+        width = timedelta(minutes=20)
+    elif span < timedelta(days=2):
+        width = timedelta(hours=1)
+    else:
+        width = timedelta(hours=3)
+    width_days = width.total_seconds() / 86400
+
+    fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
+    ax.set_facecolor(PANEL)
+
+    ax.bar(
+        dates,
+        long_vals,
+        width=width_days,
+        color=LONG_LIQ_COLOR,
+        label="Long liquidations",
+        alpha=0.92,
+        edgecolor="none",
+    )
+    ax.bar(
+        dates,
+        short_vals,
+        width=width_days,
+        bottom=long_vals,
+        color=SHORT_LIQ_COLOR,
+        label="Short liquidations",
+        alpha=0.92,
+        edgecolor="none",
+    )
+
+    last_idx = len(dates) - 1
+    ax.bar(
+        [dates[last_idx]],
+        [long_vals[last_idx]],
+        width=width_days,
+        color=LONG_LIQ_COLOR,
+        edgecolor=HIGHLIGHT_EDGE,
+        linewidth=2.0,
+        zorder=4,
+    )
+    ax.bar(
+        [dates[last_idx]],
+        [short_vals[last_idx]],
+        width=width_days,
+        bottom=[long_vals[last_idx]],
+        color=SHORT_LIQ_COLOR,
+        edgecolor=HIGHLIGHT_EDGE,
+        linewidth=2.0,
+        zorder=4,
+    )
+    ax.scatter(
+        [dates[last_idx]],
+        [totals[last_idx]],
+        color=HIGHLIGHT_EDGE,
+        s=90,
+        zorder=6,
+        edgecolors=BG,
+        linewidths=1.5,
+    )
+
+    data_hi = max(totals)
+    data_lo = min(totals)
+    current = totals[-1]
+    ctx = (
+        f"Now: {_format_chart_value(alert, current)}"
+        f"  |  High: {_format_chart_value(alert, data_hi)}"
+        f"  |  Low: {_format_chart_value(alert, data_lo)}"
+    )
+    if alert.prev_value is not None:
+        ctx += f"  |  Move: {_format_move(alert)}"
+
+    ax.set_title(_chart_title(alert, dates), color=TEXT, fontsize=16, fontweight="bold", pad=16)
+    ax.text(0.5, 1.02, ctx, transform=ax.transAxes, ha="center", color=MUTED, fontsize=10)
+    ax.set_xlabel("Date (ET)", color=MUTED, fontsize=11, labelpad=8)
+    ax.set_ylabel("1H Liquidations (USD)", color=MUTED, fontsize=11, labelpad=8)
+    ax.yaxis.set_major_formatter(_y_tick_formatter(alert))
+    ax.tick_params(colors=MUTED)
+    _configure_x_axis(ax, dates)
+    ax.legend(loc="upper left", framealpha=0.25, facecolor=PANEL, edgecolor="#334155", labelcolor=TEXT)
+    ax.set_ylim(0, data_hi * 1.2)
+    for spine in ax.spines.values():
+        spine.set_color("#334155")
+    ax.grid(True, alpha=0.2, color=MUTED, axis="y")
+
+    fname = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{alert.indicator}_liq.png"
     return _save_fig(CHART_DIR / fname)
 
 
@@ -239,5 +469,8 @@ def chart_for_decision(
     if tweet_type == "multi":
         return render_multi_card(alerts, theme)
     if is_emergency and len(alerts) == 1:
-        return render_line_chart(conn, alerts[0], cfg)
+        alert = alerts[0]
+        if alert.indicator.endswith("_liquidations"):
+            return render_liquidation_chart(conn, alert, cfg)
+        return render_line_chart(conn, alert, cfg)
     return None

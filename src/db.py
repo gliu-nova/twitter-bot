@@ -62,6 +62,11 @@ def connect() -> sqlite3.Connection:
             "ALTER TABLE pending_alerts ADD COLUMN alert_tier TEXT NOT NULL DEFAULT 'normal'"
         )
         conn.commit()
+    reading_cols = {row[1] for row in conn.execute("PRAGMA table_info(readings)")}
+    for col in ("liq_long_usd", "liq_short_usd"):
+        if col not in reading_cols:
+            conn.execute(f"ALTER TABLE readings ADD COLUMN {col} REAL")
+    conn.commit()
     return conn
 
 
@@ -87,13 +92,65 @@ def minutes_since_last_fetch(conn: sqlite3.Connection, indicator: str) -> float 
     return (datetime.now(timezone.utc) - recorded).total_seconds() / 60
 
 
-def save_reading(conn: sqlite3.Connection, indicator: str, value: float, observed_at: str) -> None:
+def save_reading(
+    conn: sqlite3.Connection,
+    indicator: str,
+    value: float,
+    observed_at: str,
+    *,
+    liq_long_usd: float | None = None,
+    liq_short_usd: float | None = None,
+) -> None:
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        "INSERT INTO readings (indicator, value, observed_at, recorded_at) VALUES (?, ?, ?, ?)",
-        (indicator, value, observed_at, now),
+        """INSERT INTO readings
+           (indicator, value, observed_at, recorded_at, liq_long_usd, liq_short_usd)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (indicator, value, observed_at, now, liq_long_usd, liq_short_usd),
     )
     conn.commit()
+
+
+def liquidation_readings_since(
+    conn: sqlite3.Connection,
+    indicator: str,
+    *,
+    days: int = 30,
+) -> list[tuple[str, float, float | None, float | None]]:
+    """All liquidation readings in the past N days (total, long, short)."""
+    from datetime import timedelta
+
+    rows = conn.execute(
+        """SELECT value, observed_at, liq_long_usd, liq_short_usd FROM readings
+           WHERE indicator = ? ORDER BY observed_at ASC""",
+        (indicator,),
+    ).fetchall()
+    if not rows:
+        return []
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    out: list[tuple[str, float, float | None, float | None]] = []
+    for row in rows:
+        ts = str(row["observed_at"])
+        try:
+            if "T" in ts:
+                observed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            elif len(ts) >= 16 and ts[10] == " ":
+                observed = datetime.strptime(ts[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+            else:
+                observed = datetime.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if observed >= cutoff:
+            out.append(
+                (
+                    ts,
+                    float(row["value"]),
+                    float(row["liq_long_usd"]) if row["liq_long_usd"] is not None else None,
+                    float(row["liq_short_usd"]) if row["liq_short_usd"] is not None else None,
+                )
+            )
+    return out
 
 
 def last_alert(conn: sqlite3.Connection, indicator: str) -> sqlite3.Row | None:
@@ -227,6 +284,37 @@ def recent_tweet_categories(conn: sqlite3.Connection, limit: int = 5) -> list[st
         (limit,),
     ).fetchall()
     return [r["primary_category"] for r in rows]
+
+
+def readings_since(
+    conn: sqlite3.Connection,
+    indicator: str,
+    *,
+    months: int = 6,
+) -> list[tuple[str, float]]:
+    """All readings in the past N months (full poll resolution)."""
+    from datetime import timedelta
+
+    rows = conn.execute(
+        """SELECT value, observed_at FROM readings
+           WHERE indicator = ? ORDER BY observed_at ASC""",
+        (indicator,),
+    ).fetchall()
+    if not rows:
+        return []
+
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=months * 31)
+    out: list[tuple[str, float]] = []
+    for row in rows:
+        ts = str(row["observed_at"])
+        day = ts[:10]
+        try:
+            day_date = datetime.fromisoformat(day).date()
+        except ValueError:
+            continue
+        if day_date >= cutoff:
+            out.append((ts, float(row["value"])))
+    return out
 
 
 def daily_readings_since(

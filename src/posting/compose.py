@@ -127,7 +127,7 @@ MACRO_INDICATORS = {
 KEY_LEVEL_CROSS_INDICATORS = frozenset({"vix", "yield_curve", "cpi_yoy", "fed_funds"})
 LIQ_LONG_PREFIX = "long_liq_usd:"
 LIQ_SHORT_PREFIX = "short_liq_usd:"
-LIQ_SKEW_THRESHOLD = 0.75
+LIQ_SKEW_THRESHOLD = 0.65
 
 THEME_HEADLINES: dict[str, str] = {
     "risk_on": "Risk-on shift",
@@ -239,7 +239,10 @@ def _format_liq_usd(value: float, *, precision: int = 1) -> str:
 
 
 def _liq_skew(alert: AlertTrigger) -> str | None:
-    """Return 'long', 'short', or None for balanced liquidations."""
+    """Return 'long', 'short', or 'mixed' for liquidation flushes."""
+    for reason in alert.reasons:
+        if reason.startswith("flush_type:"):
+            return reason.removeprefix("flush_type:")
     long_usd, short_usd = _liq_breakdown(alert)
     if long_usd is None or short_usd is None:
         return None
@@ -249,9 +252,9 @@ def _liq_skew(alert: AlertTrigger) -> str | None:
     long_share = long_usd / total
     if long_share >= LIQ_SKEW_THRESHOLD:
         return "long"
-    if long_share <= 1 - LIQ_SKEW_THRESHOLD:
+    if short_usd / total >= LIQ_SKEW_THRESHOLD:
         return "short"
-    return None
+    return "mixed"
 
 
 def _liq_breakdown(alert: AlertTrigger) -> tuple[float | None, float | None]:
@@ -266,6 +269,8 @@ def _liquidation_headline(alert: AlertTrigger) -> str:
         return f"{asset} LONG FLUSH"
     if skew == "short":
         return f"{asset} SHORT FLUSH"
+    if skew == "mixed":
+        return f"{asset} MIXED FLUSH"
     return f"{asset} LIQUIDATIONS"
 
 
@@ -285,18 +290,20 @@ def _data_lines_for_liquidation(alert: AlertTrigger, history: MoveHistory) -> li
 
 
 def _liquidation_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
-    if history.days_since_larger_move and history.days_since_larger_move >= 14:
-        return f"Biggest spike in {history.days_since_larger_move} days."
+    if history.liquidation_rank:
+        return history.liquidation_rank
+    if history.days_since_larger_move and history.days_since_larger_move >= 7:
+        return f"Largest 1H liquidation spike in {history.days_since_larger_move} days."
     if history.is_largest_ytd and history.ytd_move_count >= 5:
-        return "Biggest spike of the year."
-    if alert.alert_tier == "emergency":
-        return "Historic liquidation spike."
+        return "Largest 1H liquidation spike tracked this year."
     skew = _liq_skew(alert)
     if skew == "long":
         return "Longs flushed on selloff — forced deleveraging."
     if skew == "short":
         return "Shorts flushed on rally — forced cover wave."
-    return "Mixed liquidation flow — both sides hit."
+    if skew == "mixed":
+        return "Both sides hit — two-way liquidation flow."
+    return "Elevated 1H liquidation vs recent baseline."
 
 
 def _liquidation_takeaway(alert: AlertTrigger) -> str:
@@ -411,8 +418,10 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
         return "Largest move of the year."
     if history.is_largest_ytd and history.ytd_move_count >= 2:
         return "Largest move tracked this year."
+    if history.liquidation_rank:
+        return history.liquidation_rank
     if alert.alert_tier == "emergency":
-        return "Historic spike."
+        return "Largest move vs recent baseline."
     return None
 
 
