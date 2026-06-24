@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.market_hours import posting_schedule
 from src.posting.models import AlertTrigger
 
 
@@ -79,3 +80,42 @@ def calculate_score(
         + audience * weights["audience"]
     )
     return round(score, 1)
+
+
+def effective_score(
+    alert: AlertTrigger,
+    settings: dict[str, Any],
+    posting_cfg: dict[str, Any],
+    *,
+    in_session: bool,
+) -> float:
+    """Session-aware score for posting decisions (not persisted to DB)."""
+    base = alert.score
+    if not in_session:
+        return base
+
+    sched = posting_schedule(settings)
+    if sched == "session_only":
+        boost = float(posting_cfg.get("session_only_score_boost", 10))
+        return round(base + boost, 1)
+    if sched == "anytime":
+        penalty = float(posting_cfg.get("anytime_session_penalty", 8))
+        return round(max(0.0, base - penalty), 1)
+    return base
+
+
+def apply_session_score_adjustments(
+    alerts: list[AlertTrigger],
+    cfg: dict[str, Any],
+    posting_cfg: dict[str, Any],
+    *,
+    in_session: bool,
+) -> None:
+    """Mutate alert.score in-place for flush-time ranking during US cash session."""
+    if not in_session:
+        return
+    from src.config import indicator_settings
+
+    for alert in alerts:
+        settings = indicator_settings(cfg, alert.indicator)
+        alert.score = effective_score(alert, settings, posting_cfg, in_session=True)

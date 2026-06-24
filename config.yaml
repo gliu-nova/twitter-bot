@@ -21,6 +21,9 @@ posting:
   multi_threshold: 120
   min_cluster_size: 3
   market_buffer_minutes: 30
+  # During US cash session (9:30–16:00 ET): slight boost for session-only vs 24/7 crypto.
+  session_only_score_boost: 4
+  anytime_session_penalty: 3
   group_time_window_hours: 8
   indicator_cooldown_hours: 36
   alert_max_age_hours: 12

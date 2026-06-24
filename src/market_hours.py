@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 ET = ZoneInfo("America/New_York")
 
 OffHoursAction = Literal["post", "queue", "drop"]
+PostingSchedule = Literal["session_only", "anytime", "macro_batch"]
 
 
 def is_us_equity_session(now: datetime | None = None) -> bool:
@@ -39,6 +40,16 @@ def vix_off_hours_immediate(alert: AlertTrigger) -> bool:
         rtype == "crosses_above" and "crossed above 30" in reason
         for rtype, reason in zip(alert.rule_types, alert.reasons)
     )
+
+
+def posting_schedule(settings: dict[str, Any]) -> PostingSchedule:
+    """When an alert is allowed to flush from the posting queue."""
+    schedule = (settings.get("quality") or {}).get("schedule", "macro")
+    if schedule == "crypto_24_7":
+        return "anytime"
+    if schedule == "us_equity":
+        return "session_only"
+    return "macro_batch"
 
 
 def off_hours_equity_alert_action(

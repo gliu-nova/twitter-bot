@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import sqlite3
 
 from src.config import indicator_settings
-from src.market_hours import is_us_equity_session, vix_off_hours_immediate
+from src.market_hours import is_us_equity_session, posting_schedule, vix_off_hours_immediate
 from src.db import (
     fetch_pending_alerts,
     hours_since_indicator_post,
@@ -25,7 +25,7 @@ from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
 from src.posting.grouping import filter_stale_alerts
 from src.posting.models import AlertTrigger
-from src.posting.scoring import calculate_score
+from src.posting.scoring import apply_session_score_adjustments, calculate_score
 from src.twitter_client import post_tweet
 
 ET = ZoneInfo("America/New_York")
@@ -60,13 +60,23 @@ def _should_flush_macro(now: datetime | None = None) -> bool:
     return now.time() >= time(16, 15)
 
 
-def _should_flush_market(
+def _buffer_age_minutes(
+    alerts: list[AlertTrigger],
+    now: datetime | None = None,
+) -> float:
+    now = now or datetime.now(timezone.utc)
+    oldest = min(a.timestamp for a in alerts)
+    return (now - oldest).total_seconds() / 60
+
+
+def _should_flush_session_market(
     alerts: list[AlertTrigger],
     posting_cfg: dict[str, Any],
     now: datetime | None = None,
     *,
     now_et: datetime | None = None,
 ) -> bool:
+    """US equity-session indicators: Mon–Fri 9:30–16:00 ET (+ VIX major/emergency off-hours)."""
     if not alerts:
         return False
     now = now or datetime.now(timezone.utc)
@@ -79,9 +89,35 @@ def _should_flush_market(
         return False
 
     buffer_min = float(posting_cfg.get("market_buffer_minutes", 30))
-    oldest = min(a.timestamp for a in alerts)
-    age_minutes = (now - oldest).total_seconds() / 60
-    return age_minutes >= buffer_min
+    return _buffer_age_minutes(alerts, now) >= buffer_min
+
+
+def _should_flush_anytime_market(
+    alerts: list[AlertTrigger],
+    posting_cfg: dict[str, Any],
+    now: datetime | None = None,
+) -> bool:
+    """Crypto / 24-7 indicators: flush after buffer window any time of day."""
+    if not alerts:
+        return False
+    now = now or datetime.now(timezone.utc)
+    buffer_min = float(posting_cfg.get("market_buffer_minutes", 30))
+    return _buffer_age_minutes(alerts, now) >= buffer_min
+
+
+def _partition_market_alerts(
+    alerts: list[AlertTrigger],
+    cfg: dict[str, Any],
+) -> tuple[list[AlertTrigger], list[AlertTrigger]]:
+    session: list[AlertTrigger] = []
+    anytime: list[AlertTrigger] = []
+    for alert in alerts:
+        settings = indicator_settings(cfg, alert.indicator)
+        if posting_schedule(settings) == "anytime":
+            anytime.append(alert)
+        else:
+            session.append(alert)
+    return session, anytime
 
 
 def _emergency_escalation_allows_repost(
@@ -235,29 +271,40 @@ def process_posting_queue(
 
     market_alerts = [_row_to_alert(r, cfg) for r in market_rows]
     macro_alerts = [_row_to_alert(r, cfg) for r in macro_only]
+    session_market, anytime_market = _partition_market_alerts(market_alerts, cfg)
+    in_session = is_us_equity_session(now_et)
 
     batches: list[tuple[str, list[AlertTrigger]]] = []
 
-    if market_alerts and (
-        force or _should_flush_market(market_alerts, posting_cfg, now_utc, now_et=now_et)
+    if session_market and (
+        force or _should_flush_session_market(session_market, posting_cfg, now_utc, now_et=now_et)
     ):
-        batches.append(("market", market_alerts))
+        batches.append(("session", session_market))
 
     if macro_alerts and (force or _should_flush_macro(now_et)):
         batches.append(("macro", macro_alerts))
 
+    if anytime_market and (force or _should_flush_anytime_market(anytime_market, posting_cfg, now_utc)):
+        batches.append(("anytime", anytime_market))
+
     if not batches:
         pending = len(market_rows) + len(macro_only)
         if pending:
-            print(f"[posting] {pending} alert(s) buffered — waiting for flush window")
+            print(
+                f"[posting] {pending} alert(s) buffered — waiting for flush window "
+                f"(session={len(session_market)}, anytime={len(anytime_market)}, macro={len(macro_only)})"
+            )
         return 0
 
     posted = 0
-    for _batch_name, raw_alerts in batches:
+    for batch_name, raw_alerts in batches:
         alerts = filter_stale_alerts(raw_alerts, posting_cfg, now_utc)
         if not alerts:
             mark_alerts_processed(conn, [a.db_id for a in raw_alerts if a.db_id])
             continue
+
+        if batch_name in ("session", "anytime"):
+            apply_session_score_adjustments(alerts, cfg, posting_cfg, in_session=in_session)
 
         decision = decide_tweet_type(alerts, posting_cfg)
         if not decision:
