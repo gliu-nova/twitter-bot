@@ -27,14 +27,17 @@ Tweet style (max 280 chars):
         Prefer complete context over isolated numbers.
 
     CONTEXT
-        Explain why the move is notable.
+        Explain why the move is notable. Remove the time period (such as 1H) from the context line. 
+        So instead of "Largest 1H liquidation spike in 90 days", say "Largest liquidation spike in 90 days."
         Examples:
+        Largest ETH short flush in the past week.
         Largest spike in 90 days.
         Highest reading this year.
         Back to median after an extreme.
         Sharpest contraction since March.
 
     TAKEAWAY
+        Make takeaway text clearer, easier, and more engaging for the normal trader/investor twitter/x readers to understand.  
         What changed in market structure?
         Do not use generic phrases such as:
         "Watch follow-through."
@@ -293,27 +296,28 @@ def _liquidation_context(alert: AlertTrigger, history: MoveHistory) -> str | Non
     if history.liquidation_rank:
         return history.liquidation_rank
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
-        return f"Largest 1H liquidation spike in {history.days_since_larger_move} days."
+        return f"Largest liquidation spike in {history.days_since_larger_move} days."
     if history.is_largest_ytd and history.ytd_move_count >= 5:
-        return "Largest 1H liquidation spike tracked this year."
+        return "Largest liquidation spike tracked this year."
     skew = _liq_skew(alert)
     if skew == "long":
-        return "Longs flushed on selloff — forced deleveraging."
+        return "Longs forced out on the selloff."
     if skew == "short":
-        return "Shorts flushed on rally — forced cover wave."
+        return "Shorts forced out on the rally."
     if skew == "mixed":
         return "Both sides hit — two-way liquidation flow."
-    return "Elevated 1H liquidation vs recent baseline."
+    return "Elevated liquidation vs recent baseline."
 
 
 def _liquidation_takeaway(alert: AlertTrigger) -> str:
     skew = _liq_skew(alert)
     if skew == "long":
-        return "Price under pressure — watch for follow-through or exhaustion."
+        return "Longs are being forced out. Selling pressure building."
     if skew == "short":
-        return "Upside pressure — watch for cover exhaust or continuation."
-    asset = alert.indicator.split("_")[0].upper()
-    return f"{asset} liquidation wave — watch for follow-through or fade."
+        return "Shorts are being forced out. Momentum remains higher."
+    if skew == "mixed":
+        return "Both sides getting hit. Volatility rising — direction still open."
+    return "Liquidations elevated. Price moves may accelerate."
 
 
 def _exchange_spread_headline(alert: AlertTrigger) -> str:

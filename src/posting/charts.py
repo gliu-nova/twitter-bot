@@ -212,6 +212,28 @@ def _chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
     return f"{alert.name} — 6 Month"
 
 
+def _configure_liquidation_x_axis(ax, dates: list[datetime], *, bar_width: timedelta) -> None:
+    """One x-axis tick per bar so each stack aligns with a labeled time."""
+    if not dates:
+        return
+    ax.set_xticks(dates)
+    span = dates[-1] - dates[0] if len(dates) > 1 else bar_width
+    if span < timedelta(days=3):
+        fmt = "%b %d %H:%M"
+    else:
+        fmt = "%b %d"
+    ax.set_xticklabels(
+        [d.strftime(fmt) for d in dates],
+        rotation=35,
+        ha="right",
+        color=MUTED,
+        fontsize=9,
+    )
+    pad = bar_width * 0.6
+    ax.set_xlim(dates[0] - pad, dates[-1] + pad)
+    ax.tick_params(axis="x", colors=MUTED)
+
+
 def _configure_x_axis(ax, dates: list[datetime]) -> None:
     if len(dates) < 2:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
@@ -328,13 +350,12 @@ def render_liquidation_chart(
         for i, total in enumerate(totals):
             long_vals[i] = total
 
-    span = dates[-1] - dates[0]
-    if span < timedelta(hours=12):
-        width = timedelta(minutes=20)
-    elif span < timedelta(days=2):
-        width = timedelta(hours=1)
+    if len(dates) > 1:
+        gaps = [(dates[i + 1] - dates[i]).total_seconds() for i in range(len(dates) - 1)]
+        min_gap = min(gaps)
+        width = timedelta(seconds=min_gap * 0.65)
     else:
-        width = timedelta(hours=3)
+        width = timedelta(hours=1)
     width_days = width.total_seconds() / 86400
 
     fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
@@ -407,7 +428,7 @@ def render_liquidation_chart(
     ax.set_ylabel("1H Liquidations (USD)", color=MUTED, fontsize=11, labelpad=8)
     ax.yaxis.set_major_formatter(_y_tick_formatter(alert))
     ax.tick_params(colors=MUTED)
-    _configure_x_axis(ax, dates)
+    _configure_liquidation_x_axis(ax, dates, bar_width=width)
     ax.legend(loc="upper left", framealpha=0.25, facecolor=PANEL, edgecolor="#334155", labelcolor=TEXT)
     ax.set_ylim(0, data_hi * 1.2)
     for spine in ax.spines.values():

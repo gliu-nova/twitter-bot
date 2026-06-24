@@ -92,7 +92,7 @@ def liquidation_rank_phrase(
         cutoff = now - timedelta(days=days)
         window_vals = [total for ts, total, _, _ in rows if _parse_observed(ts) >= cutoff]
         if len(window_vals) >= 3 and value >= max(window_vals) - 1e-6:
-            return f"Largest 1H {asset} liquidation {label}."
+            return f"Largest {asset} liquidation {label}."
     return None
 
 
