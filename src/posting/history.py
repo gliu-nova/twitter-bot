@@ -23,6 +23,12 @@ LEVEL_EXTREME_INDICATORS = {
     "cpi_yoy",
     "unemployment",
     "oil",
+    "btc_funding",
+    "eth_funding",
+    "sol_funding",
+    "btc_basis",
+    "eth_basis",
+    "sol_basis",
 }
 
 
