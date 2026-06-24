@@ -232,6 +232,48 @@ def _liquidation_chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
     return f"{alert.name} — Last {len(dates)} readings"
 
 
+def _liquidation_side_vals(
+    rows: list[tuple[str, float, float | None, float | None]],
+) -> tuple[list[float], list[float], list[float]]:
+    """Per-bar long/short; rows without a split use total as long-only."""
+    long_vals: list[float] = []
+    short_vals: list[float] = []
+    totals: list[float] = []
+    for _, total, long, short in rows:
+        totals.append(total)
+        if long is None and short is None:
+            long_vals.append(total)
+            short_vals.append(0.0)
+        else:
+            long_vals.append(long if long is not None else 0.0)
+            short_vals.append(short if short is not None else 0.0)
+    return long_vals, short_vals, totals
+
+
+def _trim_liquidation_chart_rows(
+    rows: list[tuple[str, float, float | None, float | None]],
+    *,
+    max_gap_hours: float = 24.0,
+    max_rows: int = 48,
+    min_rows_before_trim: int = 8,
+) -> list[tuple[str, float, float | None, float | None]]:
+    """Drop leading sparse history after large gaps when enough polls exist."""
+    if len(rows) <= min_rows_before_trim:
+        return rows[-max_rows:]
+
+    dates = [_parse_chart_date(ts) for ts, _, _, _ in rows]
+    split_at = 0
+    for i in range(len(dates) - 1):
+        gap_h = (dates[i + 1] - dates[i]).total_seconds() / 3600
+        if gap_h > max_gap_hours:
+            split_at = i + 1
+
+    trimmed = rows[split_at:] if split_at else rows
+    if len(trimmed) < 2:
+        trimmed = rows[-2:]
+    return trimmed[-max_rows:]
+
+
 def _configure_liquidation_x_axis(ax, x_pos: list[int], dates: list[datetime]) -> None:
     """One labeled ET timestamp per bar; x_pos is evenly spaced (no calendar gaps)."""
     if not dates:
@@ -420,14 +462,9 @@ def render_liquidation_chart(
     if len(rows) < 2:
         return None
 
+    rows = _trim_liquidation_chart_rows(rows)
     dates = [_to_et(_parse_chart_date(ts)) for ts, _, _, _ in rows]
-    long_vals = [long if long is not None else 0.0 for _, _, long, _ in rows]
-    short_vals = [short if short is not None else 0.0 for _, _, _, short in rows]
-    totals = [total for _, total, _, _ in rows]
-
-    if not any(long_vals) and not any(short_vals):
-        for i, total in enumerate(totals):
-            long_vals[i] = total
+    long_vals, short_vals, totals = _liquidation_side_vals(rows)
 
     # Evenly spaced bar positions — avoids visual gaps when polls are missing for days
     x_pos = list(range(len(dates)))
@@ -510,7 +547,13 @@ def render_liquidation_chart(
     ax.tick_params(colors=MUTED)
     _configure_liquidation_x_axis(ax, x_pos, dates)
     ax.legend(loc="upper left", framealpha=0.25, facecolor=PANEL, edgecolor="#334155", labelcolor=TEXT)
-    ax.set_ylim(0, data_hi * 1.2)
+    ratio = data_hi / max(data_lo, 1e-9)
+    if ratio > 15:
+        linthresh = max(data_hi * 0.03, 1000.0)
+        ax.set_yscale("symlog", linthresh=linthresh)
+        ax.set_ylim(max(data_lo * 0.5, 1.0), data_hi * 1.2)
+    else:
+        ax.set_ylim(0, data_hi * 1.2)
     for spine in ax.spines.values():
         spine.set_color("#334155")
     ax.grid(True, alpha=0.2, color=MUTED, axis="y")

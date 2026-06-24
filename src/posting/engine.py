@@ -166,7 +166,7 @@ def _in_cooldown(
 
 
 def _daily_cap_reached(conn: sqlite3.Connection, posting_cfg: dict[str, Any]) -> bool:
-    cap = int(posting_cfg.get("daily_post_cap", 2))
+    cap = int(posting_cfg.get("daily_post_cap", 8))
     return posts_today(conn) >= cap
 
 
@@ -423,7 +423,7 @@ def process_posting_queue(
 
         # Daily cap (emergency bypasses)
         if not decision.is_emergency and _daily_cap_reached(conn, posting_cfg):
-            print(f"[posting] daily cap ({posting_cfg.get('daily_post_cap', 2)}) reached — skipping")
+            print(f"[posting] daily cap ({posting_cfg.get('daily_post_cap', 8)}) reached — skipping")
             continue
 
         if decision.tweet_type == "multi":
