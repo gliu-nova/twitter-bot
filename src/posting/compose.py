@@ -700,7 +700,7 @@ def _headline_for_alert(
     if history.is_all_time_high:
         return _headline_name(alert, major=False, history=history)
     name = _headline_name(alert, major=major, history=history)
-    body = f"MAJOR MOVE: {name}" if major else name
+    body = f"MAJOR MOVE: {name}" if major and alert.alert_tier == "emergency" else name
     return f"{emoji}{body}".strip()
 
 
@@ -719,9 +719,15 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
     if cross:
         return cross
     if history.days_since_larger_move and history.days_since_larger_move >= 14:
+        if alert.indicator in MACRO_INDICATORS or alert.is_macro:
+            word = "increase" if up else "decline"
+            return f"Largest macro {word} in {history.days_since_larger_move} days."
         word = "gain" if up else "decline"
         return f"Largest {word} in {history.days_since_larger_move} days."
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
+        if alert.indicator in MACRO_INDICATORS or alert.is_macro:
+            word = "increase" if up else "decline"
+            return f"Largest macro {word} in {history.days_since_larger_move} days."
         word = "gain" if up else "decline"
         return f"Largest {word} in {history.days_since_larger_move} days."
     if history.is_largest_ytd and history.ytd_move_count >= 5:
@@ -752,16 +758,16 @@ def _macro_context_fallback(alert: AlertTrigger, history: MoveHistory) -> str:
             "CPI reading cooled — disinflation signal.",
         ),
         "consumer_sentiment": (
-            "Sentiment weakened — consumer outlook deteriorating.",
             "Sentiment strengthened — consumer outlook improving.",
+            "Sentiment weakened — consumer outlook deteriorating.",
         ),
         "pmi_manufacturing": (
-            "Manufacturing contracted — activity below breakeven.",
             "Manufacturing expanded — activity above breakeven.",
+            "Manufacturing contracted — activity below breakeven.",
         ),
         "ism_services": (
-            "Services activity contracted — growth signal weakening.",
             "Services activity expanded — growth signal improving.",
+            "Services activity contracted — growth signal weakening.",
         ),
         "fed_funds": (
             "Fed funds rate moved higher — policy tightening.",
@@ -836,9 +842,9 @@ def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None)
         "cpi_yoy": ("Inflation pressure rising.", "Inflation pressure easing."),
         "unemployment": ("Labor market softening.", "Labor market strengthening."),
         "jobless_claims": ("Layoffs rising — labor market cooling.", "Layoffs falling — labor market firming."),
-        "consumer_sentiment": ("Consumer confidence weakening.", "Consumer confidence strengthening."),
-        "pmi_manufacturing": ("Growth expectations weakening in manufacturing.", "Growth expectations improving in manufacturing."),
-        "ism_services": ("Growth expectations weakening in services.", "Growth expectations improving in services."),
+        "consumer_sentiment": ("Consumer confidence strengthening.", "Consumer confidence weakening."),
+        "pmi_manufacturing": ("Growth expectations improving in manufacturing.", "Growth expectations weakening in manufacturing."),
+        "ism_services": ("Growth expectations improving in services.", "Growth expectations weakening in services."),
         "fed_funds": ("Financial conditions tightening.", "Financial conditions easing."),
         "m2": ("Liquidity expanding.", "Liquidity tightening."),
     }
@@ -961,7 +967,7 @@ def _cross_sections(
         alert, history, posting_cfg, standout=standout, is_emergency=is_emergency,
     )
     return {
-        "headline": _headline_for_alert(alert, major=standout, emoji=resolved_emoji, history=history),
+        "headline": _headline_for_alert(alert, major=False, emoji=resolved_emoji, history=history),
         "data_lines": [_format_value(alert)],
         "context": _cross_context_line(alert),
         "takeaway": _takeaway_line(alert, history),
@@ -1016,9 +1022,6 @@ def _emoji_for_post(
         return "🚨 "
     if alert.standalone_major and alert.indicator.endswith("_liquidations"):
         return "🚨 "
-    if any(r in ("crosses_above", "crosses_below") for r in alert.rule_types):
-        if alert.indicator in ("vix", "yield_curve", "cpi_yoy", "fed_funds"):
-            return "⚠️ "
     return ""
 
 
@@ -1034,10 +1037,6 @@ def _multi_emoji(
         return "🚨 "
     if any(a.standalone_major and a.indicator.endswith("_liquidations") for a in alerts):
         return "🚨 "
-    for a in alerts:
-        if any(r in ("crosses_above", "crosses_below") for r in a.rule_types):
-            if a.indicator in ("vix", "yield_curve", "cpi_yoy", "fed_funds"):
-                return "⚠️ "
     return ""
 
 
@@ -1334,6 +1333,15 @@ def compose_multi_tweet(
         "tightening_conditions": "Tightening signals stacking across releases.",
         "housing": "Housing indicators diverging sharply.",
     }
+    multi_takeaways = {
+        "risk_on": "Risk appetite improving across the cluster.",
+        "risk_off": "Defensive demand increasing across the cluster.",
+        "crypto": "Crypto positioning shifting across spot and perps.",
+        "inflation_pressure": "Inflation pressure rising across the cluster.",
+        "easing_conditions": "Financial conditions easing across the cluster.",
+        "tightening_conditions": "Liquidity conditions tightening across the cluster.",
+        "housing": "Housing market repricing across the cluster.",
+    }
     theme_headline = THEME_HEADLINES.get(theme, "Multi-asset move").upper()
     headline = f"{emoji}{theme_headline}".strip()
     context = _context_line(top, top_hist) or implications.get(theme, "Cluster stands out vs recent baseline.")
@@ -1341,5 +1349,5 @@ def compose_multi_tweet(
         headline=headline,
         data_lines=data_lines,
         context=context,
-        takeaway="Multiple market structure signals firing together.",
+        takeaway=multi_takeaways.get(theme, "Cross-asset market structure shifting together."),
     )
