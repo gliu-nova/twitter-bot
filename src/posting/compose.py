@@ -278,14 +278,16 @@ def _liquidation_headline(alert: AlertTrigger) -> str:
 
 
 def _data_lines_for_liquidation(alert: AlertTrigger, history: MoveHistory) -> list[str]:
-    lines = [f"{_format_liq_usd(alert.value)} liquidations (1H)"]
     long_usd, short_usd = _liq_breakdown(alert)
     pct = abs(history.pct_change or alert.magnitude_pct) if alert.prev_value is not None else 0.0
-    pct_suffix = f" ({_format_pct_line(pct, up=_direction_up(alert))})" if pct > 0 else ""
+    total_line = f"{_format_liq_usd(alert.value)} liquidations (1H)"
+    if pct > 0:
+        total_line += f" ({_format_pct_line(pct, up=_direction_up(alert))})"
+    lines = [total_line]
     if long_usd is not None and short_usd is not None:
         lines.append(
             f"Longs {_format_liq_usd(long_usd, precision=0)} | "
-            f"Shorts {_format_liq_usd(short_usd, precision=0)}{pct_suffix}"
+            f"Shorts {_format_liq_usd(short_usd, precision=0)}"
         )
     elif pct > 0:
         lines.append(_format_pct_line(pct, up=_direction_up(alert)))
