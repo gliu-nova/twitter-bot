@@ -489,9 +489,10 @@ def chart_for_decision(
 ) -> Path | None:
     if tweet_type == "multi":
         return render_multi_card(alerts, theme)
-    if is_emergency and len(alerts) == 1:
+    if len(alerts) == 1:
         alert = alerts[0]
         if alert.indicator.endswith("_liquidations"):
             return render_liquidation_chart(conn, alert, cfg)
-        return render_line_chart(conn, alert, cfg)
+        if is_emergency:
+            return render_line_chart(conn, alert, cfg)
     return None
