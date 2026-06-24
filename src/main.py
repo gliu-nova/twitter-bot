@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+import requests
 from dotenv import load_dotenv
 
 from src.alerts import check_alert
@@ -24,6 +25,8 @@ def _skip_reason_from_error(exc: Exception) -> str:
         return "stale data"
     if isinstance(exc, FetchError):
         return "fetch error"
+    if isinstance(exc, requests.RequestException):
+        return "fetch timeout" if isinstance(exc, requests.Timeout) else "fetch error"
     return "quality check"
 
 
@@ -95,7 +98,7 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
                 value, liq_long_usd, liq_short_usd, observed_at = fetch_liquidation_metric(settings)
             else:
                 value, observed_at = fetch_indicator(settings)
-        except FetchError as e:
+        except (FetchError, requests.RequestException) as e:
             reason = _skip_reason_from_error(e)
             print(f"[{key}] skipped ({reason}): {e}", file=sys.stderr)
             skipped_indicators.append((key, reason, str(e)))

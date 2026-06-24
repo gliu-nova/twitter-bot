@@ -3,9 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import requests
-
-from src.fetch import FetchError, _coingecko_latest, _kraken_latest
+from src.fetch import FetchError, _coingecko_latest, _http_get, _http_post, _kraken_latest
 
 OKX_BASE = "https://www.okx.com/api/v5"
 HL_INFO = "https://api.hyperliquid.xyz/info"
@@ -60,12 +58,11 @@ def _basis_bps(mark: float, index: float) -> float:
 
 
 def _okx_funding(inst_id: str) -> tuple[float, str]:
-    resp = requests.get(
+    resp = _http_get(
         f"{OKX_BASE}/public/funding-rate",
         params={"instId": inst_id},
-        timeout=15,
+        label=f"OKX funding {inst_id}",
     )
-    resp.raise_for_status()
     body = resp.json()
     if body.get("code") != "0" or not body.get("data"):
         raise FetchError(f"OKX funding error for {inst_id}: {body.get('msg', body)}")
@@ -73,18 +70,16 @@ def _okx_funding(inst_id: str) -> tuple[float, str]:
 
 
 def _okx_basis(inst_id: str, index_inst: str) -> tuple[float, str]:
-    mark_resp = requests.get(
+    mark_resp = _http_get(
         f"{OKX_BASE}/public/mark-price",
         params={"instId": inst_id},
-        timeout=15,
+        label=f"OKX mark {inst_id}",
     )
-    idx_resp = requests.get(
+    idx_resp = _http_get(
         f"{OKX_BASE}/market/index-tickers",
         params={"instId": index_inst},
-        timeout=15,
+        label=f"OKX index {index_inst}",
     )
-    mark_resp.raise_for_status()
-    idx_resp.raise_for_status()
     mark_body = mark_resp.json()
     idx_body = idx_resp.json()
     if mark_body.get("code") != "0" or not mark_body.get("data"):
@@ -97,8 +92,11 @@ def _okx_basis(inst_id: str, index_inst: str) -> tuple[float, str]:
 
 
 def _hl_ctx(asset: str) -> dict[str, Any]:
-    resp = requests.post(HL_INFO, json={"type": "metaAndAssetCtxs"}, timeout=15)
-    resp.raise_for_status()
+    resp = _http_post(
+        HL_INFO,
+        json={"type": "metaAndAssetCtxs"},
+        label=f"Hyperliquid {asset}",
+    )
     meta, ctxs = resp.json()
     names = [u["name"] for u in meta["universe"]]
     try:
@@ -121,8 +119,7 @@ def _hl_basis(asset: str) -> tuple[float, str]:
 
 
 def _coinbase_spot(product: str) -> tuple[float, str]:
-    resp = requests.get(f"{COINBASE_BASE}/{product}/spot", timeout=15)
-    resp.raise_for_status()
+    resp = _http_get(f"{COINBASE_BASE}/{product}/spot", label=f"Coinbase {product}")
     data = resp.json().get("data")
     if not data or "amount" not in data:
         raise FetchError(f"No Coinbase price for {product}")
@@ -140,12 +137,11 @@ def _exchange_spread(kraken_pair: str, coinbase_product: str) -> tuple[float, st
 
 
 def _okx_liquidations(uly: str, *, window_minutes: int) -> tuple[float, float, float, str]:
-    resp = requests.get(
+    resp = _http_get(
         f"{OKX_BASE}/public/liquidation-orders",
         params={"instType": "SWAP", "uly": uly, "state": "filled", "limit": 100},
-        timeout=15,
+        label=f"OKX liquidations {uly}",
     )
-    resp.raise_for_status()
     body = resp.json()
     if body.get("code") != "0":
         raise FetchError(f"OKX liquidations error for {uly}: {body.get('msg', body)}")

@@ -19,6 +19,50 @@ class FetchError(Exception):
     pass
 
 
+HTTP_TIMEOUT = 15
+HTTP_RETRIES = 2
+
+
+def _http_get(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    timeout: float = HTTP_TIMEOUT,
+    label: str = "HTTP",
+) -> requests.Response:
+    last_err: requests.RequestException | None = None
+    for attempt in range(HTTP_RETRIES + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except requests.RequestException as e:
+            last_err = e
+            if attempt < HTTP_RETRIES:
+                time.sleep(1.0 * (attempt + 1))
+    raise FetchError(f"{label} request failed: {last_err}") from last_err
+
+
+def _http_post(
+    url: str,
+    *,
+    json: dict[str, Any] | None = None,
+    timeout: float = HTTP_TIMEOUT,
+    label: str = "HTTP",
+) -> requests.Response:
+    last_err: requests.RequestException | None = None
+    for attempt in range(HTTP_RETRIES + 1):
+        try:
+            resp = requests.post(url, json=json, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except requests.RequestException as e:
+            last_err = e
+            if attempt < HTTP_RETRIES:
+                time.sleep(1.0 * (attempt + 1))
+    raise FetchError(f"{label} request failed: {last_err}") from last_err
+
+
 def _fred_api_key() -> str:
     key = os.getenv("FRED_API_KEY", "").strip()
     if not key:
@@ -98,14 +142,14 @@ def _yahoo_latest(symbol: str) -> tuple[float, str]:
 
 
 def _coingecko_latest(coin_id: str) -> tuple[float, str]:
-    last_error: requests.HTTPError | None = None
+    last_error: Exception | None = None
     for attempt in range(3):
-        resp = requests.get(
-            COINGECKO_BASE,
-            params={"ids": coin_id, "vs_currencies": "usd"},
-            timeout=30,
-        )
         try:
+            resp = requests.get(
+                COINGECKO_BASE,
+                params={"ids": coin_id, "vs_currencies": "usd"},
+                timeout=30,
+            )
             resp.raise_for_status()
         except requests.HTTPError as e:
             last_error = e
@@ -113,6 +157,12 @@ def _coingecko_latest(coin_id: str) -> tuple[float, str]:
                 time.sleep(2**attempt)
                 continue
             raise FetchError(f"CoinGecko error: {e}") from e
+        except requests.RequestException as e:
+            last_error = e
+            if attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            raise FetchError(f"CoinGecko request failed: {e}") from e
         data = resp.json()
         if coin_id not in data or "usd" not in data[coin_id]:
             raise FetchError(f"No CoinGecko price for {coin_id}")
@@ -122,11 +172,7 @@ def _coingecko_latest(coin_id: str) -> tuple[float, str]:
 
 
 def _kraken_latest(pair: str) -> tuple[float, str]:
-    resp = requests.get(KRAKEN_BASE, params={"pair": pair}, timeout=15)
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        raise FetchError(f"Kraken error: {e}") from e
+    resp = _http_get(KRAKEN_BASE, params={"pair": pair}, label=f"Kraken {pair}")
     result = resp.json().get("result")
     if not result:
         raise FetchError(f"No Kraken data for {pair}")
