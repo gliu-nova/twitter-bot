@@ -135,6 +135,13 @@ RATES_VOL_INDICATORS = frozenset({
 })
 HOUSING_INDICATORS = frozenset({"case_shiller", "mortgage_30y"})
 
+RATE_PP_INDICATORS = frozenset({
+    "cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y", "hy_spread", "yield_curve",
+})
+INDEX_DELTA_INDICATORS = frozenset({
+    "consumer_sentiment", "pmi_manufacturing", "ism_services", "move", "vix", "case_shiller",
+})
+
 SHORT_LABELS: dict[str, str] = {
     "btc": "BTC", "eth": "ETH", "sol": "SOL",
     "sp500": "S&P 500", "nasdaq100": "NASDAQ",
@@ -200,6 +207,44 @@ def _move_verb(alert: AlertTrigger, *, strong: bool = False) -> str:
     if _direction_up(alert):
         return "SURGE" if strong else "RISE"
     return "DROP" if strong else "FALL"
+
+
+def _absolute_delta_suffix(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    if alert.prev_value is None:
+        return None
+    delta = history.abs_change if history.abs_change else alert.value - alert.prev_value
+    if abs(delta) < 1e-12:
+        return None
+    sign = "+" if delta >= 0 else "-"
+    ind = alert.indicator
+
+    if ind in RATE_PP_INDICATORS:
+        mag = abs(delta)
+        if mag >= 0.01:
+            return f"({sign}{mag:.2f} pp vs prior)"
+        return f"({sign}{mag:.3f} pp vs prior)"
+
+    if ind in INDEX_DELTA_INDICATORS:
+        return f"({sign}{abs(delta):.1f} pts vs prior)"
+
+    if ind == "jobless_claims":
+        mag = abs(delta)
+        if mag >= 1000:
+            return f"({sign}{mag / 1000:.1f}K vs prior)"
+        return f"({sign}{mag:,.0f} vs prior)"
+
+    if ind == "m2":
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            return f"({_format_pct_line(pct, up=_direction_up(alert))} vs prior)"
+        return f"({sign}{abs(delta):.2f} vs prior)"
+
+    mag = abs(delta)
+    if mag < 0.1:
+        bps = mag * 100
+        move = f"{bps:.0f} bps" if bps >= 1 else f"{mag:.2f} pp"
+        return f"({sign}{move} vs prior)"
+    return f"({sign}{mag:.2f} vs prior)"
 
 
 def _format_level_extreme(phrase: str) -> str:
@@ -660,11 +705,9 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
             sign = "+" if _direction_up(alert) else "-"
             lines[0] = f"{lines[0]} ({sign}{abs(delta):.1f} bps vs prior)"
         else:
-            bps = abs(history.abs_change) * 100
-            if bps >= 0.01:
-                sign = "+" if _direction_up(alert) else "-"
-                move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
-                lines[0] = f"{lines[0]} ({sign}{move})"
+            suffix = _absolute_delta_suffix(alert, history)
+            if suffix:
+                lines[0] = f"{lines[0]} {suffix}"
     return lines
 
 
@@ -715,7 +758,7 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
         return "New all-time high."
     if history.level_extreme:
         return _format_level_extreme(history.level_extreme)
-    cross = _cross_context_line(alert)
+    cross = _cross_context_line(alert, history)
     if cross:
         return cross
     if history.days_since_larger_move and history.days_since_larger_move >= 14:
@@ -924,17 +967,23 @@ def _is_key_level_cross(alert: AlertTrigger) -> bool:
     return any(r in ("crosses_above", "crosses_below") for r in alert.rule_types)
 
 
-def _cross_context_line(alert: AlertTrigger) -> str | None:
+def _cross_context_line(alert: AlertTrigger, history: MoveHistory | None = None) -> str | None:
+    history = history or MoveHistory()
     direction = _cross_direction(alert)
     if not direction:
         return None
     if alert.indicator == "yield_curve":
-        return "Uninverted." if direction == "above" else "Inverted."
-    bound = next((r.split()[-1] for r in alert.reasons if "crossed" in r), None)
-    if bound:
-        word = "above" if direction == "above" else "below"
-        return f"Crossed {word} {bound}."
-    return "Key level break."
+        base = "Uninverted." if direction == "above" else "Inverted."
+    else:
+        bound = next((r.split()[-1] for r in alert.reasons if "crossed" in r), None)
+        if bound:
+            word = "above" if direction == "above" else "below"
+            base = f"Crossed {word} {bound}."
+        else:
+            base = "Key level break."
+    if history.days_since_larger_move and history.days_since_larger_move >= 7:
+        return f"{base.rstrip('.')} — largest move in {history.days_since_larger_move} days."
+    return base
 
 
 def _major_for_headline(
@@ -968,8 +1017,8 @@ def _cross_sections(
     )
     return {
         "headline": _headline_for_alert(alert, major=False, emoji=resolved_emoji, history=history),
-        "data_lines": [_format_value(alert)],
-        "context": _cross_context_line(alert),
+        "data_lines": _data_lines_for_alert(alert, history),
+        "context": _cross_context_line(alert, history),
         "takeaway": _takeaway_line(alert, history),
     }
 
