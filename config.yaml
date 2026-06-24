@@ -12,7 +12,7 @@ scheduler:
 # Posting engine — scoring, grouping, daily cap, buffers.
 # Threshold rules per indicator are still edited under `indicators:` below.
 posting:
-  daily_post_cap: 5          # regular posts only; emergencies bypass this cap
+  daily_post_cap: 8          # regular posts only; emergencies bypass this cap
   # indicator_cooldown_hours: global min between posts per indicator (non-emergency).
   # Emergencies honor each indicator's cooldown_hours (24h for liquidations).
   # Same-day repost only if emergency tier AND value >= emergency_escalation_multiplier x last post.

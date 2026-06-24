@@ -200,6 +200,90 @@ def _diversity_penalty(
     return 0.0
 
 
+def _alert_trigger_summary(alert: AlertTrigger) -> str:
+    """Compact one-line description of what triggered the alert."""
+    triggers = "; ".join(alert.reasons) if alert.reasons else "trigger details unavailable"
+    return (
+        f"{alert.indicator} ({alert.name}) tier={alert.alert_tier} "
+        f"score={alert.score:.0f} — {triggers}"
+    )
+
+
+def _buffer_wait_reason(
+    alert: AlertTrigger,
+    batch: str,
+    posting_cfg: dict[str, Any],
+    *,
+    now_utc: datetime,
+    now_et: datetime,
+) -> str:
+    """Explain why a buffered alert is not flushing yet."""
+    buffer_min = float(posting_cfg.get("market_buffer_minutes", 30))
+    age_min = (now_utc - alert.timestamp).total_seconds() / 60
+
+    if batch == "macro":
+        return f"macro batch flushes at 16:15 ET (queued {age_min:.0f}m ago)"
+
+    if batch == "anytime":
+        if age_min < buffer_min:
+            remaining = buffer_min - age_min
+            return (
+                f"24/7 buffer: {age_min:.0f}/{buffer_min:.0f} min elapsed "
+                f"({remaining:.0f}m remaining)"
+            )
+        return "24/7 buffer elapsed — should flush on next tick"
+
+    # US equity session indicators
+    if vix_off_hours_immediate(alert):
+        return "VIX major/emergency — eligible for immediate off-hours flush"
+    if not is_us_equity_session(now_et):
+        return "outside US equity session (9:30–16:00 ET Mon–Fri)"
+    if age_min < buffer_min:
+        remaining = buffer_min - age_min
+        return (
+            f"session buffer: {age_min:.0f}/{buffer_min:.0f} min elapsed "
+            f"({remaining:.0f}m remaining)"
+        )
+    return "session buffer elapsed — should flush on next tick"
+
+
+def _log_buffered_alerts(
+    session_market: list[AlertTrigger],
+    anytime_market: list[AlertTrigger],
+    macro_alerts: list[AlertTrigger],
+    posting_cfg: dict[str, Any],
+    *,
+    now_utc: datetime,
+    now_et: datetime,
+) -> None:
+    pending = len(session_market) + len(anytime_market) + len(macro_alerts)
+    if not pending:
+        return
+
+    print(
+        f"[posting] {pending} alert(s) buffered — waiting for flush window "
+        f"(session={len(session_market)}, anytime={len(anytime_market)}, macro={len(macro_alerts)}):"
+    )
+    for alert in session_market:
+        wait = _buffer_wait_reason(
+            alert, "session", posting_cfg, now_utc=now_utc, now_et=now_et
+        )
+        print(f"  • {_alert_trigger_summary(alert)}")
+        print(f"    why buffered: {wait}")
+    for alert in anytime_market:
+        wait = _buffer_wait_reason(
+            alert, "anytime", posting_cfg, now_utc=now_utc, now_et=now_et
+        )
+        print(f"  • {_alert_trigger_summary(alert)}")
+        print(f"    why buffered: {wait}")
+    for alert in macro_alerts:
+        wait = _buffer_wait_reason(
+            alert, "macro", posting_cfg, now_utc=now_utc, now_et=now_et
+        )
+        print(f"  • {_alert_trigger_summary(alert)}")
+        print(f"    why buffered: {wait}")
+
+
 def _prefer_macro_alternative(
     decisions: list[Any],
     all_alerts: list[AlertTrigger],
@@ -225,6 +309,8 @@ def enqueue_alert(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],
     alert: AlertTrigger,
+    *,
+    queue_reason: str = "threshold crossed",
 ) -> int:
     settings = indicator_settings(cfg, alert.indicator)
     posting_cfg = cfg.get("posting") or {}
@@ -253,10 +339,8 @@ def enqueue_alert(
         alert_tier=alert.alert_tier,
     )
     alert.db_id = alert_id
-    print(
-        f"[queue] {alert.indicator} tier={alert.alert_tier} score={alert.score} "
-        f"themes={','.join(alert.themes)}"
-    )
+    print(f"[queue] queued for posting decision — {_alert_trigger_summary(alert)}")
+    print(f"[queue]   why queued: {queue_reason}")
     return alert_id
 
 
@@ -294,12 +378,14 @@ def process_posting_queue(
         batches.append(("anytime", anytime_market))
 
     if not batches:
-        pending = len(market_rows) + len(macro_only)
-        if pending:
-            print(
-                f"[posting] {pending} alert(s) buffered — waiting for flush window "
-                f"(session={len(session_market)}, anytime={len(anytime_market)}, macro={len(macro_only)})"
-            )
+        _log_buffered_alerts(
+            session_market,
+            anytime_market,
+            macro_alerts,
+            posting_cfg,
+            now_utc=now_utc,
+            now_et=now_et,
+        )
         return 0
 
     posted = 0

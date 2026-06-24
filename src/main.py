@@ -61,7 +61,7 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     keys = [only] if only else list(cfg["indicators"].keys())
     skipped_indicators: list[tuple[str, str, str]] = []
     skipped_alerts = 0
-    queued = 0
+    queued_keys: list[str] = []
     skipped_fetch = 0
 
     for key in keys:
@@ -154,9 +154,13 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
                     if has_pending_alert(conn, key):
                         print(f"[{key}] off-hours alert deferred (already queued)")
                     else:
-                        enqueue_alert(conn, cfg, alert)
-                        queued += 1
-                        print(f"[{key}] off-hours alert queued for US session")
+                        enqueue_alert(
+                            conn,
+                            cfg,
+                            alert,
+                            queue_reason="off-hours — deferred until US equity session (9:30–16:00 ET Mon–Fri)",
+                        )
+                        queued_keys.append(key)
                     continue
                 print(f"[{key}] off-hours {alert.alert_tier} move — posting allowed")
         except QualityError as e:
@@ -164,14 +168,23 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             skipped_alerts += 1
             continue
 
-        enqueue_alert(conn, cfg, alert)
-        queued += 1
+        enqueue_alert(
+            conn,
+            cfg,
+            alert,
+            queue_reason="threshold rule(s) fired — awaiting posting engine scoring and flush window",
+        )
+        queued_keys.append(key)
 
     if skipped_fetch and not only:
         print(f"Skipped {skipped_fetch} indicator(s) not due for fetch")
 
-    if queued:
-        print(f"Queued {queued} alert(s) for posting decision")
+    if queued_keys:
+        names = ", ".join(queued_keys)
+        print(
+            f"Queued {len(queued_keys)} alert(s) for posting decision: {names} "
+            "(see [queue] lines above for trigger detail)"
+        )
     posted = process_posting_queue(conn, cfg, force=force_post)
     if posted:
         print(f"Posted {posted} tweet(s)")
