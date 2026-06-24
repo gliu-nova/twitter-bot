@@ -212,25 +212,37 @@ def _chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
     return f"{alert.name} — 6 Month"
 
 
-def _configure_liquidation_x_axis(ax, dates: list[datetime], *, bar_width: timedelta) -> None:
-    """One x-axis tick per bar so each stack aligns with a labeled time."""
+def _liquidation_chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
+    if len(dates) < 2:
+        return alert.name
+    max_gap_h = max(
+        (dates[i + 1] - dates[i]).total_seconds() / 3600 for i in range(len(dates) - 1)
+    )
+    if max_gap_h > 36:
+        return f"{alert.name} — Last {len(dates)} readings"
+    span_hours = max((dates[-1] - dates[0]).total_seconds() / 3600, 1)
+    if span_hours < 48:
+        return f"{alert.name} — Last {int(span_hours)}h"
+    span_days = max((dates[-1] - dates[0]).days, 1)
+    if span_days < 14:
+        return f"{alert.name} — Last {span_days}d"
+    return f"{alert.name} — Last {len(dates)} readings"
+
+
+def _configure_liquidation_x_axis(ax, x_pos: list[int], dates: list[datetime]) -> None:
+    """One labeled ET timestamp per bar; x_pos is evenly spaced (no calendar gaps)."""
     if not dates:
         return
-    ax.set_xticks(dates)
-    span = dates[-1] - dates[0] if len(dates) > 1 else bar_width
-    if span < timedelta(days=3):
-        fmt = "%b %d %H:%M"
-    else:
-        fmt = "%b %d"
+    ax.set_xticks(x_pos)
     ax.set_xticklabels(
-        [d.strftime(fmt) for d in dates],
-        rotation=35,
+        [d.strftime("%b %d %H:%M") for d in dates],
+        rotation=40,
         ha="right",
         color=MUTED,
-        fontsize=9,
+        fontsize=8,
     )
-    pad = bar_width * 0.6
-    ax.set_xlim(dates[0] - pad, dates[-1] + pad)
+    pad = 0.6
+    ax.set_xlim(x_pos[0] - pad, x_pos[-1] + pad)
     ax.tick_params(axis="x", colors=MUTED)
 
 
@@ -350,30 +362,26 @@ def render_liquidation_chart(
         for i, total in enumerate(totals):
             long_vals[i] = total
 
-    if len(dates) > 1:
-        gaps = [(dates[i + 1] - dates[i]).total_seconds() for i in range(len(dates) - 1)]
-        min_gap = min(gaps)
-        width = timedelta(seconds=min_gap * 0.65)
-    else:
-        width = timedelta(hours=1)
-    width_days = width.total_seconds() / 86400
+    # Evenly spaced bar positions — avoids visual gaps when polls are missing for days
+    x_pos = list(range(len(dates)))
+    bar_width = 0.72
 
     fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
     ax.set_facecolor(PANEL)
 
     ax.bar(
-        dates,
+        x_pos,
         long_vals,
-        width=width_days,
+        width=bar_width,
         color=LONG_LIQ_COLOR,
         label="Long liquidations",
         alpha=0.92,
         edgecolor="none",
     )
     ax.bar(
-        dates,
+        x_pos,
         short_vals,
-        width=width_days,
+        width=bar_width,
         bottom=long_vals,
         color=SHORT_LIQ_COLOR,
         label="Short liquidations",
@@ -383,18 +391,18 @@ def render_liquidation_chart(
 
     last_idx = len(dates) - 1
     ax.bar(
-        [dates[last_idx]],
+        [x_pos[last_idx]],
         [long_vals[last_idx]],
-        width=width_days,
+        width=bar_width,
         color=LONG_LIQ_COLOR,
         edgecolor=HIGHLIGHT_EDGE,
         linewidth=2.0,
         zorder=4,
     )
     ax.bar(
-        [dates[last_idx]],
+        [x_pos[last_idx]],
         [short_vals[last_idx]],
-        width=width_days,
+        width=bar_width,
         bottom=[long_vals[last_idx]],
         color=SHORT_LIQ_COLOR,
         edgecolor=HIGHLIGHT_EDGE,
@@ -402,7 +410,7 @@ def render_liquidation_chart(
         zorder=4,
     )
     ax.scatter(
-        [dates[last_idx]],
+        [x_pos[last_idx]],
         [totals[last_idx]],
         color=HIGHLIGHT_EDGE,
         s=90,
@@ -422,13 +430,13 @@ def render_liquidation_chart(
     if alert.prev_value is not None:
         ctx += f"  |  Move: {_format_move(alert)}"
 
-    ax.set_title(_chart_title(alert, dates), color=TEXT, fontsize=16, fontweight="bold", pad=16)
+    ax.set_title(_liquidation_chart_title(alert, dates), color=TEXT, fontsize=16, fontweight="bold", pad=16)
     ax.text(0.5, 1.02, ctx, transform=ax.transAxes, ha="center", color=MUTED, fontsize=10)
-    ax.set_xlabel("Date (ET)", color=MUTED, fontsize=11, labelpad=8)
+    ax.set_xlabel("Time (ET)", color=MUTED, fontsize=11, labelpad=8)
     ax.set_ylabel("1H Liquidations (USD)", color=MUTED, fontsize=11, labelpad=8)
     ax.yaxis.set_major_formatter(_y_tick_formatter(alert))
     ax.tick_params(colors=MUTED)
-    _configure_liquidation_x_axis(ax, dates, bar_width=width)
+    _configure_liquidation_x_axis(ax, x_pos, dates)
     ax.legend(loc="upper left", framealpha=0.25, facecolor=PANEL, edgecolor="#334155", labelcolor=TEXT)
     ax.set_ylim(0, data_hi * 1.2)
     for spine in ax.spines.values():
