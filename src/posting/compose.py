@@ -190,7 +190,10 @@ def _indicator_family(alert: AlertTrigger) -> str:
 
 
 def _short_label(alert: AlertTrigger) -> str:
-    return SHORT_LABELS.get(alert.indicator, _display_name(alert).upper())
+    ind = alert.indicator
+    if ind.endswith(("_funding", "_basis", "_exchange_spread", "_liquidations")):
+        return ind.split("_")[0].upper()
+    return SHORT_LABELS.get(ind, _display_name(alert).upper())
 
 
 def _move_verb(alert: AlertTrigger, *, strong: bool = False) -> str:
@@ -694,6 +697,8 @@ def _headline_for_alert(
         return f"{emoji}{_basis_headline(alert)}".strip()
     if alert.indicator == "fear_greed":
         return f"{emoji}{_sentiment_headline(alert)}".strip()
+    if history.is_all_time_high:
+        return _headline_name(alert, major=False, history=history)
     name = _headline_name(alert, major=major, history=history)
     body = f"MAJOR MOVE: {name}" if major else name
     return f"{emoji}{body}".strip()
@@ -730,6 +735,51 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
     return _context_fallback(alert, history)
 
 
+def _macro_context_fallback(alert: AlertTrigger, history: MoveHistory) -> str:
+    up = _direction_up(alert)
+    ind = alert.indicator
+    paired: dict[str, tuple[str, str]] = {
+        "unemployment": (
+            "Unemployment ticked higher — largest rise in months.",
+            "Unemployment eased — labor market firming.",
+        ),
+        "jobless_claims": (
+            "Claims spiked — largest weekly jump in months.",
+            "Claims fell — layoff pressure easing.",
+        ),
+        "cpi_yoy": (
+            "CPI reading heated — inflation pressure building.",
+            "CPI reading cooled — disinflation signal.",
+        ),
+        "consumer_sentiment": (
+            "Sentiment weakened — consumer outlook deteriorating.",
+            "Sentiment strengthened — consumer outlook improving.",
+        ),
+        "pmi_manufacturing": (
+            "Manufacturing contracted — activity below breakeven.",
+            "Manufacturing expanded — activity above breakeven.",
+        ),
+        "ism_services": (
+            "Services activity contracted — growth signal weakening.",
+            "Services activity expanded — growth signal improving.",
+        ),
+        "fed_funds": (
+            "Fed funds rate moved higher — policy tightening.",
+            "Fed funds rate moved lower — policy easing.",
+        ),
+        "m2": (
+            "M2 expanded — liquidity conditions loosening.",
+            "M2 slowed — liquidity conditions tightening.",
+        ),
+    }
+    if ind in paired:
+        return paired[ind][0 if up else 1]
+    if history.days_since_larger_move and history.days_since_larger_move >= 7:
+        word = "increase" if up else "decline"
+        return f"Largest macro {word} in {history.days_since_larger_move} days."
+    return "Macro release stands out vs recent readings."
+
+
 def _context_fallback(alert: AlertTrigger, history: MoveHistory) -> str | None:
     ind = alert.indicator
     if ind in PRICE_INDICATORS:
@@ -738,10 +788,15 @@ def _context_fallback(alert: AlertTrigger, history: MoveHistory) -> str | None:
             return "Sharp move vs recent sessions."
         return "Notable move vs recent trading range."
     if ind in RATES_VOL_INDICATORS:
+        if history.days_since_larger_move and history.days_since_larger_move >= 7:
+            return f"Largest rate/vol move in {history.days_since_larger_move} days."
         return "Rate and volatility conditions shifting."
     if ind in MACRO_INDICATORS or alert.is_macro:
-        return "Fresh macro data — outlook repricing."
+        return _macro_context_fallback(alert, history)
     if ind in HOUSING_INDICATORS:
+        if history.days_since_larger_move and history.days_since_larger_move >= 7:
+            word = "gain" if _direction_up(alert) else "decline"
+            return f"Largest housing {word} in {history.days_since_larger_move} days."
         return "Housing market repricing."
     if ind.endswith("_basis"):
         return _basis_context(alert, history)
@@ -792,10 +847,10 @@ def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None)
     cross = _cross_direction(alert)
     if ind == "yield_curve":
         if cross == "below":
-            return "Recession fears rising — growth expectations weakening."
+            return "Yield curve inverted — growth expectations weakening."
         if cross == "above":
-            return "Growth expectations improving — recession fears easing."
-        return "Growth expectations shifting — recession pricing in flux."
+            return "Yield curve uninverted — growth expectations improving."
+        return "Yield curve repricing — growth expectations in flux."
     if ind.endswith("_basis"):
         return _basis_takeaway(alert)
     if ind == "fear_greed":
@@ -914,54 +969,23 @@ def _cross_sections(
 
 
 def _multi_data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
-    if _is_key_level_cross(alert):
-        return [_format_value(alert)]
-    if alert.indicator.endswith("_funding"):
-        short = _funding_headline(alert)
-        val = _format_value(alert)
-        return [f"{short} {val} per 8h"]
-    if alert.indicator.endswith("_basis"):
-        short = _basis_headline(alert)
-        val = _format_value(alert)
-        return [f"{short} {val}"]
-    if alert.indicator == "fear_greed":
-        return _data_lines_for_sentiment(alert, history)
-    if alert.indicator.endswith("_exchange_spread"):
-        short = _exchange_spread_headline(alert)
-        val = _format_value(alert)
-        line = f"{short} {val}"
-        if alert.prev_value is not None:
-            pct = abs(history.pct_change or alert.magnitude_pct)
-            if pct > 0:
-                line += f" ({_format_pct_line(pct, up=_direction_up(alert))})"
-        return [line]
-    short = _headline_name(alert, major=False, history=history)
-    if (
-        alert.indicator in PRICE_INDICATORS
-        and alert.alert_unit == "percent"
-        and alert.prev_value is not None
-    ):
-        pct = abs(history.pct_change or alert.magnitude_pct)
-        if pct > 0:
-            return [f"{short} {_format_pct_line(pct, up=_direction_up(alert))}"]
-    val = _format_value(alert)
-    line = f"{short} {val}"
-    if alert.prev_value is not None and alert.alert_unit == "percent":
-        pct = abs(history.pct_change or alert.magnitude_pct)
-        if pct > 0:
-            line += f" ({_format_pct_line(pct, up=_direction_up(alert))})"
-    elif alert.prev_value is not None and alert.alert_unit == "absolute":
-        if alert.indicator.endswith("_basis"):
-            delta = history.abs_change
-            sign = "+" if _direction_up(alert) else "-"
-            line += f" ({sign}{abs(delta):.1f} bps vs prior)"
-        else:
-            bps = abs(history.abs_change) * 100
-            if bps >= 0.01:
-                sign = "+" if _direction_up(alert) else "-"
-                move = f"{bps:.0f} bps" if bps >= 1 else f"{abs(history.abs_change):.2f} pp"
-                line += f" ({sign}{move})"
-    return [line]
+    """Compact labeled data lines — no event headline repeat (multi headline is separate)."""
+    ind = alert.indicator
+    base = _short_label(alert)
+    if ind.endswith("_funding"):
+        label = f"{base} funding"
+    elif ind.endswith("_basis"):
+        label = f"{base} basis"
+    elif ind.endswith("_exchange_spread"):
+        label = f"{base} spread"
+    elif ind.endswith("_liquidations"):
+        label = f"{base} liqs"
+    else:
+        label = base
+    data = _data_lines_for_alert(alert, history)
+    lines = [f"{label}: {data[0]}"]
+    lines.extend(data[1:])
+    return lines
 
 
 def _is_standout(alert: AlertTrigger, history: MoveHistory, posting_cfg: dict[str, Any], *, is_emergency: bool) -> bool:
@@ -990,8 +1014,6 @@ def _emoji_for_post(
     """At most one emoji; only for exceptional moves."""
     if is_emergency or alert.alert_tier == "emergency":
         return "🚨 "
-    if history.is_all_time_high:
-        return "📈 "
     if alert.standalone_major and alert.indicator.endswith("_liquidations"):
         return "🚨 "
     if any(r in ("crosses_above", "crosses_below") for r in alert.rule_types):
@@ -1010,8 +1032,6 @@ def _multi_emoji(
     """Pick at most one emoji for a grouped post; exceptional moves only."""
     if is_emergency or any(a.alert_tier == "emergency" for a in alerts):
         return "🚨 "
-    if any(histories.get(a.indicator, MoveHistory()).is_all_time_high for a in alerts):
-        return "📈 "
     if any(a.standalone_major and a.indicator.endswith("_liquidations") for a in alerts):
         return "🚨 "
     for a in alerts:
@@ -1306,23 +1326,20 @@ def compose_multi_tweet(
         return _assemble_tweet(headline=cross["headline"], data_lines=data_lines, context=cross["context"], takeaway=cross["takeaway"])
 
     implications = {
-        "risk_on": "Risk appetite improving across the cluster.",
-        "risk_off": "Defensive demand increasing across the cluster.",
-        "crypto": "Crypto momentum building across the cluster.",
-        "inflation_pressure": "Inflation pressure rising across the cluster.",
-        "easing_conditions": "Financial conditions easing across the cluster.",
-        "tightening_conditions": "Financial conditions tightening across the cluster.",
-        "housing": "Housing market repricing across the cluster.",
+        "risk_on": "Largest coordinated risk-on move in weeks.",
+        "risk_off": "Largest coordinated risk-off move in weeks.",
+        "crypto": "Largest coordinated crypto move in weeks.",
+        "inflation_pressure": "Inflation signals stacking across releases.",
+        "easing_conditions": "Easing signals stacking across releases.",
+        "tightening_conditions": "Tightening signals stacking across releases.",
+        "housing": "Housing indicators diverging sharply.",
     }
-    headline = _headline_for_alert(
-        top,
-        major=_major_for_headline(top, top_hist, posting_cfg, is_emergency=is_emergency),
-        emoji=emoji,
-        history=top_hist,
-    )
+    theme_headline = THEME_HEADLINES.get(theme, "Multi-asset move").upper()
+    headline = f"{emoji}{theme_headline}".strip()
+    context = _context_line(top, top_hist) or implications.get(theme, "Cluster stands out vs recent baseline.")
     return _assemble_tweet(
         headline=headline,
         data_lines=data_lines,
-        context=_context_line(top, top_hist) or implications.get(theme),
+        context=context,
         takeaway="Multiple market structure signals firing together.",
     )
