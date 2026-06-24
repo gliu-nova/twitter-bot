@@ -199,6 +199,14 @@ def _move_verb(alert: AlertTrigger, *, strong: bool = False) -> str:
     return "DROP" if strong else "FALL"
 
 
+def _format_level_extreme(phrase: str) -> str:
+    if phrase.endswith("-day high."):
+        return f"Highest reading in {phrase.split('-')[0]} days."
+    if phrase.endswith("-day low."):
+        return f"Lowest reading in {phrase.split('-')[0]} days."
+    return phrase
+
+
 def _assemble_tweet(
     *,
     headline: str,
@@ -321,8 +329,8 @@ def _data_lines_for_liquidation(alert: AlertTrigger, history: MoveHistory) -> li
     lines = [total_line]
     if long_usd is not None and short_usd is not None:
         lines.append(
-            f"Longs {_format_liq_usd(long_usd, precision=0)} | "
-            f"Shorts {_format_liq_usd(short_usd, precision=0)}"
+            f"Longs: {_format_liq_usd(long_usd, precision=0)} | "
+            f"Shorts: {_format_liq_usd(short_usd, precision=0)}"
         )
     elif pct > 0:
         lines.append(_format_pct_line(pct, up=_direction_up(alert)))
@@ -349,12 +357,12 @@ def _liquidation_context(alert: AlertTrigger, history: MoveHistory) -> str | Non
 def _liquidation_takeaway(alert: AlertTrigger) -> str:
     skew = _liq_skew(alert)
     if skew == "long":
-        return "Longs are being forced out. Selling pressure building."
+        return "Long leverage has been flushed from the system."
     if skew == "short":
-        return "Shorts are being forced out. Momentum remains higher."
+        return "Short leverage has been flushed from the system."
     if skew == "mixed":
-        return "Both sides getting hit. Volatility rising — direction still open."
-    return "Liquidations elevated. Price moves may accelerate."
+        return "Leverage flushed on both sides — volatility expanding."
+    return "Liquidations elevated — leverage leaving the system."
 
 
 FUNDING_PERIODS_PER_YEAR = 1095  # 3 x 8h funding windows per day
@@ -411,12 +419,9 @@ def _data_lines_for_funding(alert: AlertTrigger, history: MoveHistory) -> list[s
 
 def _funding_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
     if history.level_extreme:
-        phrase = history.level_extreme
-        if phrase.endswith("-day low."):
-            return f"Lowest funding in {phrase.split('-')[0]} days."
-        if phrase.endswith("-day high."):
-            return f"Highest funding in {phrase.split('-')[0]} days."
-        return phrase
+        return _format_level_extreme(history.level_extreme).replace(
+            "reading", "funding",
+        )
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
         return f"Largest funding move in {history.days_since_larger_move} days."
     side = _funding_side(alert)
@@ -430,10 +435,10 @@ def _funding_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
 def _funding_takeaway(alert: AlertTrigger) -> str:
     side = _funding_side(alert)
     if side == "short":
-        return "Shorts are paying to hold positions. Upside squeeze risk building."
+        return "Positioning remains heavily one-sided — shorts crowded."
     if side == "long":
-        return "Longs are paying to hold positions. Downside pressure building."
-    return "Funding normalized. Leverage positioning has reset."
+        return "Positioning remains heavily one-sided — longs crowded."
+    return "Funding has normalized after a crowded trade."
 
 
 def _basis_headline(alert: AlertTrigger) -> str:
@@ -441,7 +446,7 @@ def _basis_headline(alert: AlertTrigger) -> str:
     if alert.value < 0:
         return f"{asset} BASIS INVERTED"
     if alert.prev_value is not None and alert.value > alert.prev_value:
-        return f"{asset} BASIS WIDEN"
+        return f"{asset} BASIS SURGE"
     if alert.prev_value is not None and alert.value < alert.prev_value:
         return f"{asset} BASIS COMPRESS"
     return f"{asset} BASIS MOVE"
@@ -463,12 +468,9 @@ def _data_lines_for_basis(alert: AlertTrigger, history: MoveHistory) -> list[str
 
 def _basis_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
     if history.level_extreme:
-        phrase = history.level_extreme
-        if phrase.endswith("-day low."):
-            return f"Lowest basis in {phrase.split('-')[0]} days."
-        if phrase.endswith("-day high."):
-            return f"Highest basis in {phrase.split('-')[0]} days."
-        return phrase
+        return _format_level_extreme(history.level_extreme).replace(
+            "reading", "basis",
+        )
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
         return f"Largest basis move in {history.days_since_larger_move} days."
     if alert.value < 0:
@@ -482,10 +484,10 @@ def _basis_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
 
 def _basis_takeaway(alert: AlertTrigger) -> str:
     if alert.value < 0:
-        return "Backwardation signals near-term selling pressure in futures."
+        return "Perp premium inverted — positioning skewed to the downside."
     if _direction_up(alert):
-        return "Contango widening — long demand in futures building."
-    return "Contango compressing — futures premium fading."
+        return "Perp premium widening — futures demand building."
+    return "Perp premium compressing — positioning reset underway."
 
 
 def _sentiment_headline(alert: AlertTrigger) -> str:
@@ -515,10 +517,10 @@ def _sentiment_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
 
 def _sentiment_takeaway(alert: AlertTrigger) -> str:
     if alert.value <= 25:
-        return "Fear is elevated. Markets are pricing in stress."
+        return "Fear elevated — defensive positioning building."
     if alert.value >= 75:
-        return "Greed is elevated. Complacency risk building."
-    return "Sentiment has shifted from recent levels."
+        return "Greed elevated — positioning stretched to one side."
+    return "Sentiment shifted — risk appetite repricing."
 
 
 def _macro_headline(alert: AlertTrigger, history: MoveHistory) -> str:
@@ -587,7 +589,7 @@ def _exchange_spread_headline(alert: AlertTrigger) -> str:
     asset = alert.indicator.split("_")[0].upper()
     if alert.prev_value is not None:
         if alert.value < alert.prev_value:
-            return f"{asset} SPREAD COMPRESS"
+            return f"{asset} SPREAD COLLAPSE"
         if alert.value > alert.prev_value:
             return f"{asset} SPREAD WIDEN"
     return f"{asset} EXCHANGE SPREAD"
@@ -612,15 +614,15 @@ def _exchange_spread_context(alert: AlertTrigger, history: MoveHistory) -> str |
         return "Cross-exchange arb gap compressed."
     if widening:
         return "Cross-exchange arb gap widened."
-    return None
+    return "Cross-exchange spread moved vs recent range."
 
 
 def _exchange_spread_takeaway(alert: AlertTrigger) -> str:
     if alert.prev_value is not None and alert.value < alert.prev_value:
-        return "Cross-exchange pricing converging — fragmentation easing."
+        return "Cross-exchange pricing has converged."
     if alert.prev_value is not None and alert.value > alert.prev_value:
-        return "Cross-exchange pricing diverging — liquidity stress building."
-    return "Exchange fragmentation shifting — arb conditions changing."
+        return "Liquidity conditions have tightened — venues diverging."
+    return "Cross-venue pricing shifting — fragmentation in flux."
 
 
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
@@ -634,8 +636,18 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
         return _data_lines_for_sentiment(alert, history)
     if alert.indicator.endswith("_exchange_spread"):
         return _data_lines_for_exchange_spread(alert, history)
-    lines = [_format_value(alert)]
-    if alert.alert_unit == "percent" and alert.prev_value is not None:
+    lines: list[str] = []
+    if (
+        alert.indicator in PRICE_INDICATORS
+        and alert.alert_unit == "percent"
+        and alert.prev_value is not None
+    ):
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            lines.append(_format_pct_line(pct, up=_direction_up(alert)))
+    if not lines:
+        lines = [_format_value(alert)]
+    if alert.alert_unit == "percent" and alert.prev_value is not None and alert.indicator not in PRICE_INDICATORS:
         pct = abs(history.pct_change or alert.magnitude_pct)
         if pct > 0:
             lines[0] = f"{lines[0]} ({_format_pct_line(pct, up=_direction_up(alert))})"
@@ -697,16 +709,16 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
             return f"New ATH — prior record {prior}."
         return "New all-time high."
     if history.level_extreme:
-        return history.level_extreme
+        return _format_level_extreme(history.level_extreme)
     cross = _cross_context_line(alert)
     if cross:
         return cross
     if history.days_since_larger_move and history.days_since_larger_move >= 14:
         word = "gain" if up else "decline"
-        return f"Largest daily {word} in {history.days_since_larger_move} days."
+        return f"Largest {word} in {history.days_since_larger_move} days."
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
         word = "gain" if up else "decline"
-        return f"Largest daily {word} in {history.days_since_larger_move} days."
+        return f"Largest {word} in {history.days_since_larger_move} days."
     if history.is_largest_ytd and history.ytd_move_count >= 5:
         return "Largest move of the year."
     if history.is_largest_ytd and history.ytd_move_count >= 2:
@@ -739,32 +751,41 @@ def _context_fallback(alert: AlertTrigger, history: MoveHistory) -> str | None:
 
 
 def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
+    history = history or MoveHistory()
     ind = alert.indicator
     up = _direction_up(alert)
+    if history.is_all_time_high:
+        if ind in ("gold", "silver"):
+            return "Demand for defensive assets remains strong."
+        if ind in ("btc", "eth", "sol"):
+            return "Risk appetite has improved sharply."
+        if ind in ("sp500", "nasdaq100"):
+            return "Risk appetite has improved sharply."
+        return "New highs — momentum building across this market."
     paired: dict[str, tuple[str, str]] = {
         "btc": ("Risk appetite improving across crypto.", "Selling pressure building across crypto."),
         "eth": ("Alt market momentum building.", "Alt market weakness spreading."),
-        "sol": ("High-beta crypto move — risk-on signal.", "High-beta crypto selling — risk-off signal."),
-        "sp500": ("Equity risk appetite improving.", "Equity selling pressure building."),
-        "nasdaq100": ("Growth stocks leading higher.", "Growth stocks leading lower."),
-        "gold": ("Defensive demand increasing.", "Defensive bid fading."),
-        "silver": ("Industrial and precious demand firming.", "Precious metals weakness spreading."),
-        "oil": ("Energy prices rising — inflation pressure building.", "Energy prices falling — demand concerns rising."),
-        "vix": ("Volatility rising — equity multiples under pressure.", "Volatility falling — risk appetite improving."),
-        "dxy": ("Dollar strength tightening global financial conditions.", "Dollar weakness easing global conditions."),
-        "treasury_10y": ("Borrowing costs rising — rippling through equities and housing.", "Borrowing costs falling — easing financial conditions."),
-        "hy_spread": ("Credit stress building — risk appetite fading.", "Credit stress easing — risk appetite improving."),
-        "move": ("Bond market volatility rising — rate uncertainty increasing.", "Bond market volatility falling — rate stability improving."),
+        "sol": ("High-beta move — risk appetite signal.", "High-beta selling — risk appetite fading."),
+        "sp500": ("Risk appetite has improved sharply.", "Risk appetite fading — selling pressure building."),
+        "nasdaq100": ("Growth risk appetite improving.", "Growth risk appetite fading."),
+        "gold": ("Defensive demand increasing.", "Defensive demand fading."),
+        "silver": ("Precious metals demand firming.", "Precious metals demand fading."),
+        "oil": ("Inflation pressure rising via energy.", "Demand concerns rising via energy."),
+        "vix": ("Volatility expanding — equity multiples under pressure.", "Volatility contracting — risk appetite improving."),
+        "dxy": ("Dollar strength tightening global conditions.", "Dollar weakness easing global conditions."),
+        "treasury_10y": ("Borrowing costs rising — rippling through equities and housing.", "Borrowing costs falling — financial conditions easing."),
+        "hy_spread": ("Liquidity conditions have tightened.", "Liquidity conditions have eased."),
+        "move": ("Bond volatility expanding — rate uncertainty rising.", "Bond volatility contracting — rate stability improving."),
         "mortgage_30y": ("Housing affordability worsening.", "Housing affordability improving."),
         "case_shiller": ("Home price growth accelerating.", "Home price growth cooling."),
-        "cpi_yoy": ("Inflation pressure rising — Fed policy in focus.", "Inflation cooling — easing pressure on Fed."),
+        "cpi_yoy": ("Inflation pressure rising.", "Inflation pressure easing."),
         "unemployment": ("Labor market softening.", "Labor market strengthening."),
         "jobless_claims": ("Layoffs rising — labor market cooling.", "Layoffs falling — labor market firming."),
         "consumer_sentiment": ("Consumer confidence weakening.", "Consumer confidence strengthening."),
-        "pmi_manufacturing": ("Manufacturing activity contracting.", "Manufacturing activity expanding."),
-        "ism_services": ("Services activity contracting.", "Services activity expanding."),
-        "fed_funds": ("Policy rates rising — financial conditions tightening.", "Policy rates falling — financial conditions easing."),
-        "m2": ("Money supply expanding — liquidity increasing.", "Money supply slowing — liquidity tightening."),
+        "pmi_manufacturing": ("Growth expectations weakening in manufacturing.", "Growth expectations improving in manufacturing."),
+        "ism_services": ("Growth expectations weakening in services.", "Growth expectations improving in services."),
+        "fed_funds": ("Financial conditions tightening.", "Financial conditions easing."),
+        "m2": ("Liquidity expanding.", "Liquidity tightening."),
     }
     if ind in paired:
         return paired[ind][0 if up else 1]
@@ -915,6 +936,14 @@ def _multi_data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> li
                 line += f" ({_format_pct_line(pct, up=_direction_up(alert))})"
         return [line]
     short = _headline_name(alert, major=False, history=history)
+    if (
+        alert.indicator in PRICE_INDICATORS
+        and alert.alert_unit == "percent"
+        and alert.prev_value is not None
+    ):
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            return [f"{short} {_format_pct_line(pct, up=_direction_up(alert))}"]
     val = _format_value(alert)
     line = f"{short} {val}"
     if alert.prev_value is not None and alert.alert_unit == "percent":
@@ -1277,13 +1306,13 @@ def compose_multi_tweet(
         return _assemble_tweet(headline=cross["headline"], data_lines=data_lines, context=cross["context"], takeaway=cross["takeaway"])
 
     implications = {
-        "risk_on": "Risk-on across assets.",
-        "risk_off": "Defensive tone building.",
-        "crypto": "Crypto momentum building.",
-        "inflation_pressure": "Inflation signals stacking.",
-        "easing_conditions": "Easing tone building.",
-        "tightening_conditions": "Tightening pressure rising.",
-        "housing": "Housing indicators diverging.",
+        "risk_on": "Risk appetite improving across the cluster.",
+        "risk_off": "Defensive demand increasing across the cluster.",
+        "crypto": "Crypto momentum building across the cluster.",
+        "inflation_pressure": "Inflation pressure rising across the cluster.",
+        "easing_conditions": "Financial conditions easing across the cluster.",
+        "tightening_conditions": "Financial conditions tightening across the cluster.",
+        "housing": "Housing market repricing across the cluster.",
     }
     headline = _headline_for_alert(
         top,
@@ -1295,5 +1324,5 @@ def compose_multi_tweet(
         headline=headline,
         data_lines=data_lines,
         context=_context_line(top, top_hist) or implications.get(theme),
-        takeaway="Multiple signals firing — cross-asset implications building.",
+        takeaway="Multiple market structure signals firing together.",
     )
