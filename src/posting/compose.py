@@ -1,119 +1,3 @@
-"""Compose high-quality X/Twitter alert text for financial market events.
-
-Goal:
-Do not merely report a metric. Explain what changed, why it is unusual, and why a trader/investor should care.
-Core Structure (strong alert style):
-    - Strong, descriptive headline (e.g. "BTC Long Flush", "Major ETH Spread Collapse")
-    - Key numbers with clear labels and timeframes
-    - Breakdowns when relevant (Longs vs Shorts, etc.)
-    - One strong context/rarity line ("Biggest spike in 90 days", "Sharpest move in 30 days", etc.)
-    - Clear, actionable takeaway line starting with "→"
-
-    Emojis: max 1 per post(usually 🚨 for major moves), only for exceptional moves; most posts have none.
-
-Tweet style (max 280 chars):
-    HEADLINE
-        Prefer event-oriented headlines over metric-oriented headlines.
-        Examples:
-        BTC LONG FLUSH
-        FUNDING RESET
-        BASIS SURGE
-        SPREAD COLLAPSE
-        LIQUIDITY DRAIN
-
-    DATA
-        Include the primary metric.
-        Include supporting metrics when available.
-        Prefer complete context over isolated numbers.
-
-    CONTEXT
-        Explain why the move is notable. Remove the time period (such as 1H) from the context line. 
-        So instead of "Largest 1H liquidation spike in 90 days", say "Largest liquidation spike in 90 days."
-        Examples:
-        Largest ETH short flush in the past week.
-        Largest spike in 90 days.
-        Highest reading this year.
-        Back to median after an extreme.
-        Sharpest contraction since March.
-
-    TAKEAWAY
-        Make takeaway text clearer, easier, and more engaging for the normal trader/investor twitter/x readers to understand.  
-        What changed in market structure?
-        Do not use generic phrases such as:
-        "Watch follow-through."
-        "Monitor closely."
-        "Stay alert."
-
-Instead describe the most relevant market implication of the move.
-Examples:
-- Positioning reset
-- Leverage flushed
-- Liquidity tightening
-- Volatility expanding
-- Risk appetite improving
-- Inflation pressure rising
-- Growth expectations weakening
-- Defensive demand increasing
-
-Examples of good output style:
-{ 
-BTC Long Flush
-
-$461.8M liquidations (1H)
-Longs: $380M | Shorts: $82M (+2,177%)
-
-Biggest spike in 90 days.
-
-→ Long leverage has been flushed from the system.
-}
-
-{
-SP500 SURGE
-
-+2.3%
-
-Largest 1-day gain in 4 months.
-
-→ Risk appetite has improved sharply.
-}
-
-{
-GOLD RECORD HIGH
-
-$3,420/oz
-
-New all-time high.
-
-→ Demand for defensive assets remains strong.
-}
-
-TAKEAWAY RULES
-
-The takeaway should describe the market structure implication, not predict future price.
-
-Prefer:
-→ Long leverage has been flushed from the system.
-→ Funding has normalized after a crowded long trade.
-→ Cross-exchange pricing has converged.
-→ Positioning remains heavily one-sided.
-→ Liquidity conditions have tightened.
-
-Avoid:
-→ Bullish.
-→ Bearish.
-→ Price should rise.
-→ Reversal incoming.
-→ Watch follow-through.
-→ Watch for exhaustion.
-→ Traders should buy/sell.
-
-Professional and data-driven. Concise.
-
-Every alert should answer:
-What happened?
-Why is it unusual?
-Why should a trader/investor care?
-"""
 
 from __future__ import annotations
 
@@ -141,6 +25,11 @@ RATE_PP_INDICATORS = frozenset({
 INDEX_DELTA_INDICATORS = frozenset({
     "consumer_sentiment", "pmi_manufacturing", "ism_services", "move", "vix", "case_shiller",
 })
+DIFFUSION_INDEX_INDICATORS = frozenset({"pmi_manufacturing", "ism_services"})
+DIFFUSION_INDEX_LABELS: dict[str, str] = {
+    "pmi_manufacturing": "Mfg diffusion index",
+    "ism_services": "Services activity index",
+}
 
 SHORT_LABELS: dict[str, str] = {
     "btc": "BTC", "eth": "ETH", "sol": "SOL",
@@ -203,10 +92,25 @@ def _short_label(alert: AlertTrigger) -> str:
     return SHORT_LABELS.get(ind, _display_name(alert).upper())
 
 
-def _move_verb(alert: AlertTrigger, *, strong: bool = False) -> str:
+def _move_verb(
+    alert: AlertTrigger,
+    *,
+    strong: bool = False,
+    history: MoveHistory | None = None,
+) -> str:
+    pct = abs((history.pct_change if history else 0) or alert.magnitude_pct or 0)
+    major = strong or alert.alert_tier in ("major", "emergency")
     if _direction_up(alert):
-        return "SURGE" if strong else "RISE"
-    return "DROP" if strong else "FALL"
+        if major or pct >= 5:
+            return "SURGE"
+        if pct >= 2:
+            return "JUMP"
+        return "CLIMB"
+    if major or pct >= 5:
+        return "DROP"
+    if pct >= 2:
+        return "SLIP"
+    return "FALL"
 
 
 def _absolute_delta_suffix(alert: AlertTrigger, history: MoveHistory) -> str | None:
@@ -230,7 +134,9 @@ def _absolute_delta_suffix(alert: AlertTrigger, history: MoveHistory) -> str | N
     if ind == "jobless_claims":
         mag = abs(delta)
         if mag >= 1000:
-            return f"({sign}{mag / 1000:.1f}K vs prior)"
+            k = mag / 1000
+            ktxt = f"{k:.0f}k" if k == int(k) else f"{k:.1f}k"
+            return f"({sign}{ktxt} vs prior)"
         return f"({sign}{mag:,.0f} vs prior)"
 
     if ind == "m2":
@@ -255,6 +161,13 @@ def _format_level_extreme(phrase: str) -> str:
     return phrase
 
 
+def _format_takeaway(message: str) -> str:
+    msg = message.strip().rstrip(".")
+    if msg.lower().startswith("signal:"):
+        return msg
+    return f"Signal: {msg}"
+
+
 def _assemble_tweet(
     *,
     headline: str,
@@ -269,7 +182,7 @@ def _assemble_tweet(
     if context:
         parts.append(context.strip())
     if takeaway:
-        parts.append(f"→ {takeaway.strip().rstrip('.')}.")
+        parts.append(f"→ {_format_takeaway(takeaway)}.")
     return "\n\n".join(parts)[:280]
 
 
@@ -405,12 +318,12 @@ def _liquidation_context(alert: AlertTrigger, history: MoveHistory) -> str | Non
 def _liquidation_takeaway(alert: AlertTrigger) -> str:
     skew = _liq_skew(alert)
     if skew == "long":
-        return "Long leverage has been flushed from the system."
+        return "a large pocket of long leverage was forced out"
     if skew == "short":
-        return "Short leverage has been flushed from the system."
+        return "a large pocket of short leverage was forced out"
     if skew == "mixed":
-        return "Leverage flushed on both sides — volatility expanding."
-    return "Liquidations elevated — leverage leaving the system."
+        return "leverage forced out on both sides — volatility may expand"
+    return "leverage forced out sharply"
 
 
 FUNDING_PERIODS_PER_YEAR = 1095  # 3 x 8h funding windows per day
@@ -483,21 +396,21 @@ def _funding_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
 def _funding_takeaway(alert: AlertTrigger) -> str:
     side = _funding_side(alert)
     if side == "short":
-        return "Positioning remains heavily one-sided — shorts crowded."
+        return "funding getting crowded on the short side"
     if side == "long":
-        return "Positioning remains heavily one-sided — longs crowded."
-    return "Funding has normalized after a crowded trade."
+        return "funding getting crowded on the long side"
+    return "funding normalizing after a crowded trade"
 
 
 def _basis_headline(alert: AlertTrigger) -> str:
     asset = alert.indicator.split("_")[0].upper()
     if alert.value < 0:
-        return f"{asset} BASIS INVERTED"
+        return f"{asset} BASIS INVERTS"
     if alert.prev_value is not None and alert.value > alert.prev_value:
-        return f"{asset} BASIS SURGE"
+        return f"{asset} BASIS SURGES"
     if alert.prev_value is not None and alert.value < alert.prev_value:
-        return f"{asset} BASIS COMPRESS"
-    return f"{asset} BASIS MOVE"
+        return f"{asset} BASIS COMPRESSES"
+    return f"{asset} BASIS MOVES"
 
 
 def _data_lines_for_basis(alert: AlertTrigger, history: MoveHistory) -> list[str]:
@@ -532,10 +445,10 @@ def _basis_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
 
 def _basis_takeaway(alert: AlertTrigger) -> str:
     if alert.value < 0:
-        return "Perp premium inverted — positioning skewed to the downside."
+        return "perps trading below spot — downside demand elevated"
     if _direction_up(alert):
-        return "Perp premium widening — futures demand building."
-    return "Perp premium compressing — positioning reset underway."
+        return "futures premium widening — demand may be building"
+    return "futures premium compressing — positioning reset underway"
 
 
 def _sentiment_headline(alert: AlertTrigger) -> str:
@@ -565,10 +478,10 @@ def _sentiment_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
 
 def _sentiment_takeaway(alert: AlertTrigger) -> str:
     if alert.value <= 25:
-        return "Fear elevated — defensive positioning building."
+        return "defensive demand rising"
     if alert.value >= 75:
-        return "Greed elevated — positioning stretched to one side."
-    return "Sentiment shifted — risk appetite repricing."
+        return "positioning stretched to one side"
+    return "risk appetite repricing"
 
 
 def _macro_headline(alert: AlertTrigger, history: MoveHistory) -> str:
@@ -590,7 +503,7 @@ def _macro_headline(alert: AlertTrigger, history: MoveHistory) -> str:
         return "M2 EXPANSION" if up else "M2 SLOWDOWN"
     if ind == "fed_funds":
         return "FED RATE RISE" if up else "FED RATE CUT"
-    return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
+    return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
 
 
 def _rates_headline(alert: AlertTrigger, history: MoveHistory) -> str:
@@ -609,16 +522,16 @@ def _rates_headline(alert: AlertTrigger, history: MoveHistory) -> str:
     if ind == "hy_spread":
         if cross == "above" or alert.value >= 5:
             return "CREDIT STRESS"
-        return f"HY SPREAD {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
+        return f"HY SPREAD {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
     if ind == "move":
-        return f"BOND VOL {_move_verb(alert, strong=True)}"
+        return f"BOND VOL {_move_verb(alert, strong=True, history=history)}"
     if ind == "treasury_10y":
-        return f"YIELDS {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
+        return f"YIELDS {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
     if ind == "dxy":
-        return f"DOLLAR {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
+        return f"DOLLAR {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
     if ind == "fed_funds":
         return _macro_headline(alert, history)
-    return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
+    return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
 
 
 def _event_headline(alert: AlertTrigger, history: MoveHistory) -> str:
@@ -629,17 +542,17 @@ def _event_headline(alert: AlertTrigger, history: MoveHistory) -> str:
     if alert.indicator in RATES_VOL_INDICATORS:
         return _rates_headline(alert, history)
     if alert.indicator in HOUSING_INDICATORS:
-        return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
-    return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'))}"
+        return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
+    return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
 
 
 def _exchange_spread_headline(alert: AlertTrigger) -> str:
     asset = alert.indicator.split("_")[0].upper()
     if alert.prev_value is not None:
         if alert.value < alert.prev_value:
-            return f"{asset} SPREAD COLLAPSE"
+            return f"{asset} SPREAD COLLAPSES"
         if alert.value > alert.prev_value:
-            return f"{asset} SPREAD WIDEN"
+            return f"{asset} SPREAD WIDENS"
     return f"{asset} EXCHANGE SPREAD"
 
 
@@ -667,10 +580,20 @@ def _exchange_spread_context(alert: AlertTrigger, history: MoveHistory) -> str |
 
 def _exchange_spread_takeaway(alert: AlertTrigger) -> str:
     if alert.prev_value is not None and alert.value < alert.prev_value:
-        return "Cross-exchange pricing has converged."
+        return "venue pricing converging"
     if alert.prev_value is not None and alert.value > alert.prev_value:
-        return "Liquidity conditions have tightened — venues diverging."
-    return "Cross-venue pricing shifting — fragmentation in flux."
+        return "venue pricing diverging — liquidity may be thinning"
+    return "venue pricing shifting across venues"
+
+
+def _data_lines_for_diffusion_index(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    label = DIFFUSION_INDEX_LABELS[alert.indicator]
+    line = f"{label}: {alert.value:.1f} (0 = breakeven)"
+    if alert.prev_value is not None:
+        suffix = _absolute_delta_suffix(alert, history)
+        if suffix:
+            line += f" {suffix}"
+    return [line]
 
 
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
@@ -684,6 +607,8 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
         return _data_lines_for_sentiment(alert, history)
     if alert.indicator.endswith("_exchange_spread"):
         return _data_lines_for_exchange_spread(alert, history)
+    if alert.indicator in DIFFUSION_INDEX_INDICATORS:
+        return _data_lines_for_diffusion_index(alert, history)
     lines: list[str] = []
     if (
         alert.indicator in PRICE_INDICATORS
@@ -741,7 +666,7 @@ def _headline_for_alert(
     if alert.indicator == "fear_greed":
         return f"{emoji}{_sentiment_headline(alert)}".strip()
     if history.is_all_time_high:
-        return _headline_name(alert, major=False, history=history)
+        return f"{emoji}{_headline_name(alert, major=False, history=history)}".strip()
     name = _headline_name(alert, major=major, history=history)
     body = f"MAJOR MOVE: {name}" if major and alert.alert_tier == "emergency" else name
     return f"{emoji}{body}".strip()
@@ -860,46 +785,44 @@ def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None)
     up = _direction_up(alert)
     if history.is_all_time_high:
         if ind in ("gold", "silver"):
-            return "Demand for defensive assets remains strong."
-        if ind in ("btc", "eth", "sol"):
-            return "Risk appetite has improved sharply."
-        if ind in ("sp500", "nasdaq100"):
-            return "Risk appetite has improved sharply."
-        return "New highs — momentum building across this market."
+            return "defensive demand remains strong"
+        if ind in ("btc", "eth", "sol", "sp500", "nasdaq100"):
+            return "improving risk appetite"
+        return "momentum building at new highs"
     paired: dict[str, tuple[str, str]] = {
-        "btc": ("Risk appetite improving across crypto.", "Selling pressure building across crypto."),
-        "eth": ("Alt market momentum building.", "Alt market weakness spreading."),
-        "sol": ("High-beta move — risk appetite signal.", "High-beta selling — risk appetite fading."),
-        "sp500": ("Risk appetite has improved sharply.", "Risk appetite fading — selling pressure building."),
-        "nasdaq100": ("Growth risk appetite improving.", "Growth risk appetite fading."),
-        "gold": ("Defensive demand increasing.", "Defensive demand fading."),
-        "silver": ("Precious metals demand firming.", "Precious metals demand fading."),
-        "oil": ("Inflation pressure rising via energy.", "Demand concerns rising via energy."),
-        "vix": ("Volatility expanding — equity multiples under pressure.", "Volatility contracting — risk appetite improving."),
-        "dxy": ("Dollar strength tightening global conditions.", "Dollar weakness easing global conditions."),
-        "treasury_10y": ("Borrowing costs rising — rippling through equities and housing.", "Borrowing costs falling — financial conditions easing."),
-        "hy_spread": ("Liquidity conditions have tightened.", "Liquidity conditions have eased."),
-        "move": ("Bond volatility expanding — rate uncertainty rising.", "Bond volatility contracting — rate stability improving."),
-        "mortgage_30y": ("Housing affordability worsening.", "Housing affordability improving."),
-        "case_shiller": ("Home price growth accelerating.", "Home price growth cooling."),
-        "cpi_yoy": ("Inflation pressure rising.", "Inflation pressure easing."),
-        "unemployment": ("Labor market softening.", "Labor market strengthening."),
-        "jobless_claims": ("Layoffs rising — labor market cooling.", "Layoffs falling — labor market firming."),
-        "consumer_sentiment": ("Consumer confidence strengthening.", "Consumer confidence weakening."),
-        "pmi_manufacturing": ("Growth expectations improving in manufacturing.", "Growth expectations weakening in manufacturing."),
-        "ism_services": ("Growth expectations improving in services.", "Growth expectations weakening in services."),
-        "fed_funds": ("Financial conditions tightening.", "Financial conditions easing."),
-        "m2": ("Liquidity expanding.", "Liquidity tightening."),
+        "btc": ("improving risk appetite across crypto", "selling pressure building across crypto"),
+        "eth": ("alt momentum building", "alt weakness spreading"),
+        "sol": ("high-beta risk appetite improving", "high-beta risk appetite fading"),
+        "sp500": ("improving risk appetite", "fading risk appetite"),
+        "nasdaq100": ("growth risk appetite improving", "growth risk appetite fading"),
+        "gold": ("defensive demand rising", "defensive demand easing"),
+        "silver": ("precious metals demand firming", "precious metals demand fading"),
+        "oil": ("inflation pressure rising via energy", "demand concerns rising via energy"),
+        "vix": ("volatility expanding — pressure on equity multiples", "volatility contracting — risk appetite may improve"),
+        "dxy": ("dollar strength tightening global conditions", "dollar weakness easing global conditions"),
+        "treasury_10y": ("borrowing costs rising — rippling through risk assets", "borrowing costs falling — conditions may ease"),
+        "hy_spread": ("credit stress building — liquidity may be tightening", "credit stress easing — liquidity may improve"),
+        "move": ("bond volatility expanding — rate uncertainty rising", "bond volatility contracting — rate stability improving"),
+        "mortgage_30y": ("housing affordability worsening", "housing affordability improving"),
+        "case_shiller": ("home price growth accelerating", "home price growth cooling"),
+        "cpi_yoy": ("inflation pressure narrative heating up", "inflation pressure narrative cooling"),
+        "unemployment": ("labor market softening", "labor market strengthening"),
+        "jobless_claims": ("labor data cooling", "labor data firming"),
+        "consumer_sentiment": ("consumer confidence strengthening", "consumer confidence weakening"),
+        "pmi_manufacturing": ("manufacturing growth expectations improving", "manufacturing growth expectations weakening"),
+        "ism_services": ("services growth expectations improving", "services growth expectations weakening"),
+        "fed_funds": ("financial conditions tightening", "financial conditions easing"),
+        "m2": ("liquidity expanding", "liquidity tightening"),
     }
     if ind in paired:
         return paired[ind][0 if up else 1]
     cross = _cross_direction(alert)
     if ind == "yield_curve":
         if cross == "below":
-            return "Yield curve inverted — growth expectations weakening."
+            return "growth expectations weakening"
         if cross == "above":
-            return "Yield curve uninverted — growth expectations improving."
-        return "Yield curve repricing — growth expectations in flux."
+            return "growth expectations improving"
+        return "growth expectations in flux"
     if ind.endswith("_basis"):
         return _basis_takeaway(alert)
     if ind == "fear_greed":
@@ -910,7 +833,7 @@ def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None)
         return _exchange_spread_takeaway(alert)
     if ind.endswith("_liquidations"):
         return _liquidation_takeaway(alert)
-    return "Market conditions shifting — implications spreading across assets."
+    return "market structure shifting across assets"
 
 
 def _takeaway_line(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
@@ -937,6 +860,12 @@ def _format_value(alert: AlertTrigger) -> str:
         return f"${v:,.0f}"
     if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
         return f"{v:.2f}%"
+    if alert.indicator == "jobless_claims":
+        if v >= 1000:
+            k = v / 1000
+            ktxt = f"{k:.0f}k" if k == int(k) else f"{k:.1f}k"
+            return f"{ktxt} claims"
+        return f"{int(v)} claims"
     if v >= 1000:
         return f"${v:,.0f}"
     if v >= 100:
@@ -1066,11 +995,19 @@ def _emoji_for_post(
     standout: bool,
     is_emergency: bool,
 ) -> str:
-    """At most one emoji; only for exceptional moves."""
+    """At most one emoji for exceptional moves."""
     if is_emergency or alert.alert_tier == "emergency":
         return "🚨 "
-    if alert.standalone_major and alert.indicator.endswith("_liquidations"):
+    if alert.indicator.endswith("_liquidations"):
         return "🚨 "
+    if history.is_all_time_high:
+        return "🔥 "
+    if alert.indicator == "yield_curve" and _cross_direction(alert) == "below":
+        return "⚠️ "
+    if alert.indicator == "vix" and (alert.value >= 30 or _cross_direction(alert) == "above"):
+        return "⚠️ "
+    if alert.indicator in PRICE_INDICATORS and standout and alert.alert_tier in ("major", "emergency"):
+        return "📈 " if _direction_up(alert) else "📉 "
     return ""
 
 
@@ -1084,7 +1021,7 @@ def _multi_emoji(
     """Pick at most one emoji for a grouped post; exceptional moves only."""
     if is_emergency or any(a.alert_tier == "emergency" for a in alerts):
         return "🚨 "
-    if any(a.standalone_major and a.indicator.endswith("_liquidations") for a in alerts):
+    if any(a.indicator.endswith("_liquidations") for a in alerts):
         return "🚨 "
     return ""
 
@@ -1383,13 +1320,13 @@ def compose_multi_tweet(
         "housing": "Housing indicators diverging sharply.",
     }
     multi_takeaways = {
-        "risk_on": "Risk appetite improving across the cluster.",
-        "risk_off": "Defensive demand increasing across the cluster.",
-        "crypto": "Crypto positioning shifting across spot and perps.",
-        "inflation_pressure": "Inflation pressure rising across the cluster.",
-        "easing_conditions": "Financial conditions easing across the cluster.",
-        "tightening_conditions": "Liquidity conditions tightening across the cluster.",
-        "housing": "Housing market repricing across the cluster.",
+        "risk_on": "improving risk appetite across the cluster",
+        "risk_off": "defensive demand rising across the cluster",
+        "crypto": "crypto positioning shifting across spot and perps",
+        "inflation_pressure": "inflation pressure narrative heating up across the cluster",
+        "easing_conditions": "financial conditions easing across the cluster",
+        "tightening_conditions": "liquidity tightening across the cluster",
+        "housing": "housing market repricing across the cluster",
     }
     theme_headline = THEME_HEADLINES.get(theme, "Multi-asset move").upper()
     headline = f"{emoji}{theme_headline}".strip()
@@ -1398,5 +1335,5 @@ def compose_multi_tweet(
         headline=headline,
         data_lines=data_lines,
         context=context,
-        takeaway=multi_takeaways.get(theme, "Cross-asset market structure shifting together."),
+        takeaway=multi_takeaways.get(theme, "market structure shifting together across assets"),
     )
