@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import requests
@@ -192,6 +193,7 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     if posted:
         print(f"Posted {posted} tweet(s)")
 
+    sync_report = None
     try:
         from src.market_memory_bridge import maybe_sync_market_memory
 
@@ -203,6 +205,19 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             )
     except Exception as exc:
         print(f"[market-memory] sync error: {exc}", file=sys.stderr)
+
+    try:
+        from src.ops_heartbeat import push_ops_heartbeat
+
+        push_ops_heartbeat(
+            health=health,
+            sync_report=sync_report,
+            posted_tweets=posted,
+            skipped_indicators=len(skipped_indicators),
+            trigger=os.environ.get("BOT_TRIGGER_SOURCE", "local"),
+        )
+    except Exception as exc:
+        print(f"[ops-hub] heartbeat error: {exc}", file=sys.stderr)
 
     conn.close()
     if skipped_alerts:

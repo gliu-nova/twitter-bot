@@ -30,6 +30,9 @@ jobs:
       MARKET_MEMORY_DATA_DIR: data/market_memory
       # Secret name in repo settings must match (COINALYZE_API_KEY or coinalyze_api_key).
       COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY || secrets.coinalyze_api_key }}
+      OPS_HUB_URL: ${{ vars.OPS_HUB_URL || 'https://ops-hub-8ek.pages.dev' }}
+      OPS_HEARTBEAT_SECRET: ${{ secrets.OPS_HEARTBEAT_SECRET }}
+      BOT_TRIGGER_SOURCE: ${{ github.event.inputs.source || github.event_name }}
 
     steps:
       - name: Log trigger
