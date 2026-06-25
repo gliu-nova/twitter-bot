@@ -9,10 +9,11 @@ scheduler:
   macro_hours: 6
   housing_hours: 24
 
-# Market Memory — local DuckDB historical context (../market-memory/data).
+# Market Memory — DuckDB historical context (CI: data/market_memory via MARKET_MEMORY_DATA_DIR).
+# Production runs on GitHub Actions only; no local launchd scheduler required.
 market_memory:
   enabled: true
-  data_dir: ../market-memory/data
+  data_dir: data/market_memory
   since: "2021-01-01"
   min_occurrences: 3
   sync_on_poll: true          # incremental sync each bot tick (respects sync_interval_minutes)

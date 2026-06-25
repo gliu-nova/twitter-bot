@@ -1136,6 +1136,11 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
 
 
 def _macro_context_fallback(alert: AlertTrigger, history: MoveHistory) -> str:
+    if alert.indicator == "fed_funds":
+        memory_line = _memory_context_line(alert)
+        if memory_line:
+            return memory_line
+
     up = _direction_up(alert)
     ind = alert.indicator
     paired: dict[str, tuple[str, str]] = {

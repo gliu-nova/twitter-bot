@@ -1,4 +1,5 @@
 #!/bin/bash
+# Local Mac scheduler only — skip if you run production via GitHub Actions.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PLIST_SRC="$DIR/scripts/com.georgeliu.twitter-bot.plist"
