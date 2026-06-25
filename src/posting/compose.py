@@ -1,128 +1,59 @@
-"""Compose high-quality X/Twitter alert text for financial market events.
+"""Compose accessible X/Twitter alert text for financial market events.
 
-Goal:
-Do not merely report a metric. Explain what changed, why it is unusual, and why a trader/investor should care.
-Core Structure (strong alert style):
-    - Strong, descriptive headline (e.g. "BTC Long Flush", "Major ETH Spread Collapse")
-    - Key numbers with clear labels and timeframes
-    - Breakdowns when relevant (Longs vs Shorts, etc.)
-    - One strong context/rarity line ("Biggest spike in 90 days", "Sharpest move in 30 days", etc.)
-    - Clear, actionable takeaway line starting with "→"
+Structure (max ~280 chars):
+    - Accessible headline with key number
+    - WHAT happened (plain English + data)
+    - WHY / rarity (one factual context line; prefer time-based rarity when supported)
+    - WHY IT MATTERS (natural → implication; evidence-based, not predictive)
 
-    Emojis: max 1 per post(usually 🚨 for major moves), only for exceptional moves; most posts have none.
+Voice: thoughtful market analyst — varied phrasing, calm on small moves, sharper on rare ones.
 
-Tweet style (max 280 chars):
-    HEADLINE
-        Prefer event-oriented headlines over metric-oriented headlines.
-        Examples:
-        BTC LONG FLUSH
-        FUNDING RESET
-        BASIS SURGE
-        SPREAD COLLAPSE
-        LIQUIDITY DRAIN
-
-    DATA
-        Include the primary metric.
-        Include supporting metrics when available.
-        Prefer complete context over isolated numbers.
-
-    CONTEXT
-        Explain why the move is notable. Remove the time period (such as 1H) from the context line.
-        So instead of "Largest 1H liquidation spike in 90 days", say "Largest liquidation spike in 90 days."
-        Examples:
-        Largest ETH short flush in the past week.
-        Largest spike in 90 days.
-        Highest reading this year.
-        Back to median after an extreme.
-        Sharpest contraction since March.
-
-    TAKEAWAY
-        Make takeaway text clearer, easier, and more engaging for the normal trader/investor twitter/x readers to understand.
-        What changed in market structure?
-        Do not use generic phrases such as:
-        "Watch follow-through."
-        "Monitor closely."
-        "Stay alert."
-
-Instead describe the most relevant market implication of the move.
-Examples:
-- Positioning reset
-- Leverage flushed
-- Liquidity tightening
-- Volatility expanding
-- Risk appetite improving
-- Inflation pressure rising
-- Growth expectations weakening
-- Defensive demand increasing
-
-Examples of good output style:
-{
-BTC Long Flush
-
-$461.8M liquidations (1H)
-Longs: $380M | Shorts: $82M (+2,177%)
-
-Biggest spike in 90 days.
-
-→ Long leverage has been flushed from the system.
-}
-
-{
-SP500 SURGE
-
-+2.3%
-
-Largest 1-day gain in 4 months.
-
-→ Risk appetite has improved sharply.
-}
-
-{
-GOLD RECORD HIGH
-
-$3,420/oz
-
-New all-time high.
-
-→ Demand for defensive assets remains strong.
-}
-
-TAKEAWAY RULES
-
-The takeaway should describe the market structure implication, not predict future price.
-
-Prefer:
-→ Long leverage has been flushed from the system.
-→ Funding has normalized after a crowded long trade.
-→ Cross-exchange pricing has converged.
-→ Positioning remains heavily one-sided.
-→ Liquidity conditions have tightened.
-
-Avoid:
-→ Bullish.
-→ Bearish.
-→ Price should rise.
-→ Reversal incoming.
-→ Watch follow-through.
-→ Watch for exhaustion.
-→ Traders should buy/sell.
-
-Professional and data-driven. Concise.
-
-Every alert should answer:
-What happened?
-Why is it unusual?
-Why should a trader/investor care?
-
-Spec reference: prompts/goal-modify-indicator-template-wording.md
+Spec reference: prompts/post-enhancements2.md
 """
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.posting.history import MoveHistory
 from src.posting.models import AlertTrigger
+
+JARGON_TERMS = (
+    "cross-exchange arb gap",
+    "venue pricing",
+    "arb gap",
+    "less easy arb",
+    "upside fuel",
+    "downside fuel",
+    "perp premium",
+    "positioning reset underway",
+)
+
+GENERIC_IMPLICATION_PHRASES = (
+    "market structure shifting",
+    "monitor closely",
+    "watch follow-through",
+    "stay alert",
+    "signal:",
+    "takeaway:",
+)
+
+CONFIDENT_PHRASES = (
+    "squeeze risk is building",
+    "less forced selling pressure ahead",
+    "buyers are in control",
+    "bulls are in control",
+    "bears are in control",
+    "shorts take control",
+    "is inevitable",
+    "this confirms",
+    "this means",
+    "will move",
+    "price should",
+    "likely to",
+)
 
 MACRO_INDICATORS = {
     "cpi_yoy", "fed_funds", "unemployment", "jobless_claims",
@@ -168,6 +99,40 @@ LIQ_LONG_PREFIX = "long_liq_usd:"
 LIQ_SHORT_PREFIX = "short_liq_usd:"
 LIQ_SKEW_THRESHOLD = 0.65
 
+def _variant_index(alert: AlertTrigger, salt: str, count: int) -> int:
+    if count <= 1:
+        return 0
+    bucket = int(abs(alert.value) * 1000) % 97
+    key = f"{alert.indicator}:{salt}:{alert.timestamp.date()}:{bucket}"
+    return sum(ord(c) for c in key) % count
+
+
+def _pick_variant(alert: AlertTrigger, salt: str, variants: list[str]) -> str:
+    return variants[_variant_index(alert, salt, len(variants))]
+
+
+def _move_pct(alert: AlertTrigger, history: MoveHistory) -> float:
+    if history.pct_change:
+        return abs(history.pct_change)
+    if alert.prev_value and alert.prev_value != 0:
+        return abs((alert.value - alert.prev_value) / alert.prev_value * 100)
+    return abs(alert.magnitude_pct or 0)
+
+
+def _is_large_move(alert: AlertTrigger, history: MoveHistory) -> bool:
+    if alert.alert_tier in ("major", "emergency"):
+        return True
+    if history.days_since_larger_move and history.days_since_larger_move >= 14:
+        return True
+    if history.is_all_time_high or history.is_largest_ytd:
+        return True
+    return _move_pct(alert, history) >= 15
+
+
+def _asset_symbol(alert: AlertTrigger) -> str:
+    return alert.indicator.split("_")[0].upper()
+
+
 THEME_HEADLINES: dict[str, str] = {
     "risk_on": "Risk-on shift",
     "risk_off": "Risk-off building",
@@ -190,6 +155,8 @@ def _indicator_family(alert: AlertTrigger) -> str:
         return "basis"
     if ind.endswith("_exchange_spread"):
         return "exchange_spread"
+    if ind.endswith("_open_interest"):
+        return "open_interest"
     if ind == "fear_greed":
         return "sentiment"
     if ind in MACRO_INDICATORS or alert.is_macro:
@@ -279,11 +246,14 @@ def _format_level_extreme(phrase: str) -> str:
     return phrase
 
 
-def _format_takeaway(message: str) -> str:
+def _format_implication(message: str) -> str:
     msg = message.strip().rstrip(".")
-    if msg.lower().startswith("signal:"):
-        return msg
-    return f"Signal: {msg}"
+    lowered = msg.lower()
+    for prefix in ("signal:", "takeaway:", "→ signal:", "→ takeaway:"):
+        if lowered.startswith(prefix):
+            msg = msg[len(prefix):].strip()
+            lowered = msg.lower()
+    return msg
 
 
 def _assemble_tweet(
@@ -300,8 +270,89 @@ def _assemble_tweet(
     if context:
         parts.append(context.strip())
     if takeaway:
-        parts.append(f"→ {_format_takeaway(takeaway)}.")
+        parts.append(f"→ {_format_implication(takeaway)}.")
     return "\n\n".join(parts)[:280]
+
+
+@dataclass
+class PostValidationResult:
+    ok: bool
+    issues: list[str] = field(default_factory=list)
+
+
+def _post_implication_line(text: str) -> str | None:
+    for line in reversed(text.splitlines()):
+        stripped = line.strip()
+        if stripped.startswith("→"):
+            return stripped
+    return None
+
+
+def _value_tokens_in_post(alert: AlertTrigger) -> list[str]:
+    tokens = [_format_value(alert)]
+    if alert.indicator.endswith("_funding"):
+        tokens.append(_annualized_funding(alert.value))
+        if alert.prev_value is not None:
+            delta = alert.value - alert.prev_value
+            tokens.append(f"{delta * 100:+.4f}%")
+    if alert.indicator.endswith("_liquidations") and alert.value >= 1_000_000:
+        tokens.append(_format_liq_usd(alert.value))
+    if alert.prev_value is not None and alert.alert_unit == "percent":
+        pct = abs((alert.value - alert.prev_value) / abs(alert.prev_value) * 100) if alert.prev_value else 0
+        if pct > 0:
+            tokens.append(f"{pct:.1f}%")
+    return [t for t in tokens if t]
+
+
+def validate_post_before_send(
+    text: str,
+    alert: AlertTrigger,
+    *,
+    chart_title: str | None = None,
+    chart_latest_value: str | None = None,
+) -> PostValidationResult:
+    """Pre-post checks from prompts/post-enhancements.md."""
+    issues: list[str] = []
+    lowered = text.lower()
+
+    if re.search(r"\b(signal|takeaway)\s*:", lowered):
+        issues.append('generic "Signal:" or "Takeaway:" label found')
+
+    for term in JARGON_TERMS:
+        if term in lowered:
+            issues.append(f"jargon without plain pairing: {term!r}")
+
+    implication = _post_implication_line(text)
+    if not implication:
+        issues.append("missing implication line (→)")
+    elif any(phrase in implication.lower() for phrase in GENERIC_IMPLICATION_PHRASES):
+        issues.append("implication line too generic")
+    elif any(phrase in lowered for phrase in CONFIDENT_PHRASES):
+        issues.append("overly confident or predictive phrasing")
+
+    if chart_title:
+        family = _indicator_family(alert)
+        title_lower = chart_title.lower()
+        if family == "exchange_spread" and "coinbase" not in title_lower and "kraken" not in title_lower:
+            issues.append("chart title does not match exchange-spread narrative")
+        if family == "funding" and "funding" not in title_lower:
+            issues.append("chart title does not match funding metric")
+        if family == "basis" and "futures" not in title_lower and "spot" not in title_lower:
+            issues.append("chart title does not match basis metric")
+        if family == "liquidation" and "liquidation" not in title_lower:
+            issues.append("chart title does not match liquidation metric")
+        if family == "open_interest" and "open interest" not in title_lower:
+            issues.append("chart title does not match open-interest metric")
+
+    if chart_latest_value:
+        formatted = _format_value(alert)
+        if formatted not in text and chart_latest_value not in text:
+            issues.append("latest chart value not reflected in post text")
+
+    if not any(token in text for token in _value_tokens_in_post(alert)):
+        issues.append("key metric value missing from post")
+
+    return PostValidationResult(ok=not issues, issues=issues)
 
 
 def _format_pct_line(pct: float, *, up: bool) -> str:
@@ -387,16 +438,171 @@ def _liq_breakdown(alert: AlertTrigger) -> tuple[float | None, float | None]:
     return alert.liq_long_usd, alert.liq_short_usd
 
 
-def _liquidation_headline(alert: AlertTrigger) -> str:
-    asset = alert.indicator.split("_")[0].upper()
+def _crypto_rarity_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    """One strong time-based context line when historical data supports it."""
+    family = _indicator_family(alert)
+    asset = _asset_symbol(alert)
+
+    if history.liquidation_rank:
+        return history.liquidation_rank.rstrip(".")
+
+    if history.is_all_time_high and family == "open_interest":
+        return "Highest open interest on record."
+
+    if history.level_extreme:
+        phrase = _format_level_extreme(history.level_extreme).rstrip(".")
+        if family == "funding":
+            return phrase.replace("Highest reading", "Highest funding").replace("Lowest reading", "Lowest funding")
+        if family == "basis":
+            return phrase.replace("Highest reading", "Widest futures premium").replace("Lowest reading", "Narrowest futures premium")
+        if family == "open_interest":
+            return phrase.replace("Highest reading", "Highest open interest").replace("Lowest reading", "Lowest open interest")
+        if family == "exchange_spread":
+            compressing = alert.prev_value is not None and alert.value < alert.prev_value
+            widening = alert.prev_value is not None and alert.value > alert.prev_value
+            if compressing and "low" in phrase.lower():
+                return phrase.replace("Lowest reading", "Tightest Coinbase-Kraken gap")
+            if widening and "high" in phrase.lower():
+                return phrase.replace("Highest reading", "Widest Coinbase-Kraken gap")
+        return phrase
+
+    days = history.days_since_larger_move
+    if not days or days < 7:
+        if history.is_largest_ytd and history.ytd_move_count >= 5 and family == "liquidation":
+            return "Biggest liquidation spike this year."
+        return None
+
+    if family == "liquidation":
+        return f"Biggest spike in {days} days."
+    if family == "funding":
+        if alert.value < -0.00001:
+            if days >= 14 and days % 7 == 0:
+                w = days // 7
+                unit = "week" if w == 1 else "weeks"
+                return f"Most negative funding in {w} {unit}."
+            return f"Most negative funding in {days} days."
+        return f"Biggest funding move in {days} days."
+    if family == "basis":
+        return f"Largest futures-spot move in {days} days."
+    if family == "open_interest":
+        return f"Largest open-interest move in {days} days."
+    if family == "exchange_spread":
+        compressing = alert.prev_value is not None and alert.value < alert.prev_value
+        widening = alert.prev_value is not None and alert.value > alert.prev_value
+        if compressing:
+            return f"Sharpest compression in {days} days."
+        if widening:
+            return f"Widest Coinbase-Kraken gap in {days} days."
+        return f"Largest spread move in {days} days."
+    return None
+
+
+def _crypto_why_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    """Factual context that adds information beyond the headline."""
+    family = _indicator_family(alert)
+    if family == "exchange_spread":
+        compressing = alert.prev_value is not None and alert.value < alert.prev_value
+        widening = alert.prev_value is not None and alert.value > alert.prev_value
+        asset = _asset_symbol(alert)
+        if compressing:
+            return _pick_variant(alert, "spread-why-down", [
+                "Coinbase and Kraken moved closer together.",
+                f"The two venues are pricing {asset} more similarly than before.",
+            ])
+        if widening:
+            return _pick_variant(alert, "spread-why-up", [
+                "Coinbase and Kraken moved farther apart.",
+                f"The two venues are quoting {asset} wider apart than before.",
+            ])
+        return None
+    if family == "funding":
+        side = _funding_side(alert)
+        if side == "short":
+            return _pick_variant(alert, "fund-why-neg", [
+                "Funding has flipped below zero, with shorts now paying longs.",
+                "Shorts are paying longs to keep positions open.",
+            ])
+        if side == "long":
+            return _pick_variant(alert, "fund-why-pos", [
+                "Longs are paying elevated rates to hold positions.",
+                "Longs continue to pay shorts at a higher rate.",
+            ])
+        return _pick_variant(alert, "fund-why-neutral", [
+            "Funding has settled back near zero.",
+            "Carry costs have moved back toward neutral.",
+        ])
+    if family == "liquidation":
+        skew = _liq_skew(alert)
+        long_usd, short_usd = _liq_breakdown(alert)
+        if skew == "long" and long_usd is not None and short_usd is not None:
+            return "Longs made up most of the hourly total."
+        if skew == "short" and long_usd is not None and short_usd is not None:
+            return "Shorts made up most of the hourly total."
+        if skew == "long":
+            return "Forced closes hit long positions during the selloff."
+        if skew == "short":
+            return "Forced closes hit short positions during the rally."
+        if skew == "mixed":
+            return "Both sides were liquidated in the same hour."
+        return "The hourly total ran well above recent readings."
+    if family == "basis":
+        if alert.value < 0:
+            return _pick_variant(alert, "basis-why-neg", [
+                "Futures flipped to a discount after trading above spot.",
+                "Perps are now priced below the cash market.",
+            ])
+        if alert.prev_value is not None and alert.value > alert.prev_value:
+            return "Futures are trading farther above spot than before."
+        if alert.prev_value is not None and alert.value < alert.prev_value:
+            return "The premium over spot has come in from prior levels."
+        return None
+    if family == "open_interest":
+        if _direction_up(alert):
+            return _pick_variant(alert, "oi-why-up", [
+                "Traders are adding leverage.",
+                "New positions are outpacing closes.",
+            ])
+        return _pick_variant(alert, "oi-why-down", [
+            "Traders are reducing open positions.",
+            "Open positions are being closed faster than they open.",
+        ])
+    return None
+
+
+def _has_crypto_rarity(alert: AlertTrigger, history: MoveHistory) -> bool:
+    return _crypto_rarity_line(alert, history) is not None
+
+
+def _crypto_context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    rarity = _crypto_rarity_line(alert, history)
+    if rarity:
+        return rarity
+    return _crypto_why_line(alert, history)
+
+
+def _liquidation_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    asset = _asset_symbol(alert)
     skew = _liq_skew(alert)
+    large = _is_large_move(alert, history)
     if skew == "long":
-        return f"{asset} LONG FLUSH"
+        if large:
+            return _pick_variant(alert, "liq-h-long", [
+                f"{asset} long liquidations spike",
+                f"{asset} long flush",
+                f"{asset} long-side liquidations jump",
+            ])
+        return f"{asset} long liquidations rise"
     if skew == "short":
-        return f"{asset} SHORT FLUSH"
+        if large:
+            return _pick_variant(alert, "liq-h-short", [
+                f"{asset} short liquidations spike",
+                f"{asset} short flush",
+                f"{asset} short-side liquidations jump",
+            ])
+        return f"{asset} short liquidations rise"
     if skew == "mixed":
-        return f"{asset} MIXED FLUSH"
-    return f"{asset} LIQUIDATIONS"
+        return f"{asset} liquidations spike"
+    return f"{asset} liquidations rise"
 
 
 def _data_lines_for_liquidation(alert: AlertTrigger, history: MoveHistory) -> list[str]:
@@ -416,32 +622,26 @@ def _data_lines_for_liquidation(alert: AlertTrigger, history: MoveHistory) -> li
     return lines
 
 
-def _liquidation_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
-    if history.liquidation_rank:
-        return history.liquidation_rank
-    if history.days_since_larger_move and history.days_since_larger_move >= 7:
-        return f"Largest liquidation spike in {history.days_since_larger_move} days."
-    if history.is_largest_ytd and history.ytd_move_count >= 5:
-        return "Largest liquidation spike tracked this year."
+def _liquidation_takeaway(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
     skew = _liq_skew(alert)
     if skew == "long":
-        return "Longs forced out on the selloff."
+        return _pick_variant(alert, "liq-t-long", [
+            "Long positioning has been reduced.",
+            "A large share of long leverage was cleared.",
+            "Forced selling removed crowded long exposure.",
+        ])
     if skew == "short":
-        return "Shorts forced out on the rally."
+        return _pick_variant(alert, "liq-t-short", [
+            "Short positioning has been reduced.",
+            "A large share of short leverage was cleared.",
+            "Forced buying removed crowded short exposure.",
+        ])
     if skew == "mixed":
-        return "Both sides hit — two-way liquidation flow."
-    return "Elevated liquidation vs recent baseline."
-
-
-def _liquidation_takeaway(alert: AlertTrigger) -> str:
-    skew = _liq_skew(alert)
-    if skew == "long":
-        return "a large pocket of long leverage was forced out"
-    if skew == "short":
-        return "a large pocket of short leverage was forced out"
-    if skew == "mixed":
-        return "leverage forced out on both sides — volatility may expand"
-    return "leverage forced out sharply"
+        return _pick_variant(alert, "liq-t-mixed", [
+            "Leverage was cleared on both sides.",
+            "Two-way liquidations may keep volatility elevated.",
+        ])
+    return "Market leverage was reduced in the move."
 
 
 FUNDING_PERIODS_PER_YEAR = 1095  # 3 x 8h funding windows per day
@@ -461,14 +661,28 @@ def _funding_side(alert: AlertTrigger) -> str:
     return "neutral"
 
 
-def _funding_headline(alert: AlertTrigger) -> str:
-    asset = alert.indicator.split("_")[0].upper()
+def _funding_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    asset = _asset_symbol(alert)
     side = _funding_side(alert)
+    large = _is_large_move(alert, history)
     if side == "short":
-        return f"{asset} FUNDING NEGATIVE"
+        return _pick_variant(alert, "fund-h-neg", [
+            f"{asset} funding turns negative",
+            f"{asset} funding drops below zero",
+            f"{asset} funding flips negative",
+        ])
     if side == "long":
-        return f"{asset} FUNDING SURGE"
-    return f"{asset} FUNDING RESET"
+        if large:
+            return _pick_variant(alert, "fund-h-pos", [
+                f"{asset} funding rises",
+                f"{asset} funding climbs",
+                f"{asset} funding moves higher",
+            ])
+        return f"{asset} funding turns positive"
+    return _pick_variant(alert, "fund-h-neutral", [
+        f"{asset} funding resets near zero",
+        f"{asset} funding returns to neutral",
+    ])
 
 
 def _annualized_funding(rate: float) -> str:
@@ -496,77 +710,126 @@ def _data_lines_for_funding(alert: AlertTrigger, history: MoveHistory) -> list[s
     ]
 
 
-def _funding_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
-    if history.level_extreme:
-        return _format_level_extreme(history.level_extreme).replace(
-            "reading", "funding",
-        )
-    if history.days_since_larger_move and history.days_since_larger_move >= 7:
-        return f"Largest funding move in {history.days_since_larger_move} days."
+def _funding_takeaway(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
     side = _funding_side(alert)
     if side == "short":
-        return "Funding turned negative — shorts paying longs."
+        return _pick_variant(alert, "fund-t-neg", [
+            "Shorts are becoming the more crowded side.",
+            "Positioning has shifted below neutral.",
+            "The market is leaning more short.",
+        ])
     if side == "long":
-        return "Funding elevated — longs paying shorts."
-    return "Funding near neutral — positioning reset underway."
+        return _pick_variant(alert, "fund-t-pos", [
+            "Longs are becoming the more crowded side.",
+            "Traders are increasingly positioned long.",
+            "Positioning is more one-sided toward longs.",
+        ])
+    return _pick_variant(alert, "fund-t-neutral", [
+        "Positioning looks more balanced.",
+        "Carry pressure is less one-sided.",
+    ])
 
 
-def _funding_takeaway(alert: AlertTrigger) -> str:
-    side = _funding_side(alert)
-    if side == "short":
-        return "funding getting crowded on the short side"
-    if side == "long":
-        return "funding getting crowded on the long side"
-    return "funding normalizing after a crowded trade"
-
-
-def _basis_headline(alert: AlertTrigger) -> str:
-    asset = alert.indicator.split("_")[0].upper()
+def _basis_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    asset = _asset_symbol(alert)
     if alert.value < 0:
-        return f"{asset} BASIS INVERTS"
+        return _pick_variant(alert, "basis-h-neg", [
+            f"{asset} futures fall below spot",
+            f"{asset} futures trade at a discount",
+        ])
     if alert.prev_value is not None and alert.value > alert.prev_value:
-        return f"{asset} BASIS SURGES"
+        return _pick_variant(alert, "basis-h-up", [
+            f"{asset} futures premium widens",
+            f"{asset} futures pull above spot",
+        ])
     if alert.prev_value is not None and alert.value < alert.prev_value:
-        return f"{asset} BASIS COMPRESSES"
-    return f"{asset} BASIS MOVES"
+        return _pick_variant(alert, "basis-h-down", [
+            f"{asset} futures premium narrows",
+            f"{asset} futures premium compresses",
+        ])
+    return f"{asset} futures vs spot moves"
 
 
 def _data_lines_for_basis(alert: AlertTrigger, history: MoveHistory) -> list[str]:
-    line = f"{_format_value(alert)} perp vs spot"
+    line = f"Futures vs spot: {_format_value(alert)}"
     if alert.prev_value is not None:
         delta = history.abs_change if history.abs_change else alert.value - alert.prev_value
         sign = "+" if delta >= 0 else "-"
         line += f" ({sign}{abs(delta):.1f} bps vs prior)"
-    structure = (
-        "Backwardation — futures below spot."
-        if alert.value < 0
-        else "Contango — futures above spot."
-    )
-    return [line, structure]
+    return [line]
 
 
-def _basis_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
-    if history.level_extreme:
-        return _format_level_extreme(history.level_extreme).replace(
-            "reading", "basis",
-        )
-    if history.days_since_larger_move and history.days_since_larger_move >= 7:
-        return f"Largest basis move in {history.days_since_larger_move} days."
+def _basis_takeaway(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
+    history = history or MoveHistory()
     if alert.value < 0:
-        return "Perp basis turned negative — futures trading below spot."
-    if alert.prev_value is not None and alert.value > alert.prev_value:
-        return "Perp premium widened vs spot."
-    if alert.prev_value is not None and alert.value < alert.prev_value:
-        return "Perp premium compressed vs spot."
-    return "Perp-spot spread stretched vs recent range."
-
-
-def _basis_takeaway(alert: AlertTrigger) -> str:
-    if alert.value < 0:
-        return "perps trading below spot — downside demand elevated"
+        return _pick_variant(alert, "basis-t-neg", [
+            "Spot is trading at a premium to futures.",
+            "Cash prices sit above perps.",
+        ])
     if _direction_up(alert):
-        return "futures premium widening — demand may be building"
-    return "futures premium compressing — positioning reset underway"
+        if _has_crypto_rarity(alert, history):
+            return _pick_variant(alert, "basis-t-up-rare", [
+                "Futures demand strengthened relative to spot.",
+                "Buyers are paying more to hold futures vs spot.",
+            ])
+        return _pick_variant(alert, "basis-t-up", [
+            "Futures demand strengthened relative to spot.",
+            "Buyers are paying a larger premium over spot.",
+        ])
+    return _pick_variant(alert, "basis-t-down", [
+        "Futures demand cooled relative to spot.",
+        "Traders are paying less to hold futures vs spot.",
+        "The futures premium over spot compressed.",
+    ])
+
+
+def _open_interest_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    asset = _asset_symbol(alert)
+    if history.is_all_time_high:
+        return _pick_variant(alert, "oi-h-ath", [
+            f"{asset} open interest reaches a new high",
+            f"{asset} open interest hits a record",
+        ])
+    if alert.prev_value is not None:
+        if _direction_up(alert):
+            return _pick_variant(alert, "oi-h-up", [
+                f"{asset} open interest rises",
+                f"{asset} open interest builds",
+            ])
+        return _pick_variant(alert, "oi-h-down", [
+            f"{asset} open interest falls",
+            f"{asset} open interest declines",
+        ])
+    return f"{asset} open interest moves"
+
+
+def _data_lines_for_open_interest(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    line = f"Open interest: {_format_value(alert)}"
+    if alert.prev_value is not None:
+        pct = abs(history.pct_change or alert.magnitude_pct)
+        if pct > 0:
+            line += f" ({_format_pct_line(pct, up=_direction_up(alert))} vs prior)"
+    return [line]
+
+
+def _open_interest_takeaway(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
+    history = history or MoveHistory()
+    if _direction_up(alert):
+        if history.is_all_time_high:
+            return _pick_variant(alert, "oi-t-ath", [
+                "More leverage is in the market than at any prior peak.",
+                "Total outstanding exposure has never been higher.",
+            ])
+        return _pick_variant(alert, "oi-t-up", [
+            "More leverage is entering the market.",
+            "Traders are adding exposure.",
+            "Open positions continue to build.",
+        ])
+    return _pick_variant(alert, "oi-t-down", [
+        "Leverage is coming out of the market.",
+        "Traders are cutting exposure.",
+        "Open positions are declining.",
+    ])
 
 
 def _sentiment_headline(alert: AlertTrigger) -> str:
@@ -664,18 +927,26 @@ def _event_headline(alert: AlertTrigger, history: MoveHistory) -> str:
     return f"{_short_label(alert)} {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
 
 
-def _exchange_spread_headline(alert: AlertTrigger) -> str:
-    asset = alert.indicator.split("_")[0].upper()
+def _exchange_spread_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    asset = _asset_symbol(alert)
     if alert.prev_value is not None:
         if alert.value < alert.prev_value:
-            return f"{asset} SPREAD COLLAPSES"
+            return _pick_variant(alert, "spread-h-down", [
+                f"{asset} exchange prices converge",
+                f"{asset} venue prices align",
+                f"{asset} exchange gap compresses",
+            ])
         if alert.value > alert.prev_value:
-            return f"{asset} SPREAD WIDENS"
-    return f"{asset} EXCHANGE SPREAD"
+            return _pick_variant(alert, "spread-h-up", [
+                f"{asset} exchange prices diverge",
+                f"{asset} venue prices drift apart",
+                f"{asset} exchange gap widens",
+            ])
+    return f"{asset} exchange spread moves"
 
 
 def _data_lines_for_exchange_spread(alert: AlertTrigger, history: MoveHistory) -> list[str]:
-    line = f"{_format_value(alert)} Kraken vs Coinbase"
+    line = f"Price gap: {_format_value(alert)} (Coinbase vs Kraken)"
     if alert.prev_value is not None:
         pct = abs(history.pct_change or alert.magnitude_pct)
         if pct > 0:
@@ -683,25 +954,31 @@ def _data_lines_for_exchange_spread(alert: AlertTrigger, history: MoveHistory) -
     return [line]
 
 
-def _exchange_spread_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
+def _exchange_spread_takeaway(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
+    history = history or MoveHistory()
     compressing = alert.prev_value is not None and alert.value < alert.prev_value
     widening = alert.prev_value is not None and alert.value > alert.prev_value
-    if history.days_since_larger_move and history.days_since_larger_move >= 14:
-        word = "compression" if compressing else "widening" if widening else "move"
-        return f"Largest spread {word} in {history.days_since_larger_move} days."
     if compressing:
-        return "Cross-exchange arb gap compressed."
+        if _has_crypto_rarity(alert, history):
+            return _pick_variant(alert, "spread-t-down-rare", [
+                "Less room for cross-exchange arbitrage.",
+                "Arbitrage spreads have compressed.",
+            ])
+        return _pick_variant(alert, "spread-t-down", [
+            "Less room for cross-exchange arbitrage.",
+            "Pricing is more aligned across exchanges.",
+        ])
     if widening:
-        return "Cross-exchange arb gap widened."
-    return "Cross-exchange spread moved vs recent range."
-
-
-def _exchange_spread_takeaway(alert: AlertTrigger) -> str:
-    if alert.prev_value is not None and alert.value < alert.prev_value:
-        return "venue pricing converging"
-    if alert.prev_value is not None and alert.value > alert.prev_value:
-        return "venue pricing diverging — liquidity may be thinning"
-    return "venue pricing shifting across venues"
+        if _has_crypto_rarity(alert, history):
+            return _pick_variant(alert, "spread-t-up-rare", [
+                "Price differences between exchanges are widening.",
+                "More room for cross-exchange arbitrage.",
+            ])
+        return _pick_variant(alert, "spread-t-up", [
+            "Price differences between exchanges are widening.",
+            "Arbitrage room is widening.",
+        ])
+    return "Cross-exchange pricing is shifting."
 
 
 def _data_lines_for_diffusion_index(alert: AlertTrigger, history: MoveHistory) -> list[str]:
@@ -725,6 +1002,8 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
         return _data_lines_for_sentiment(alert, history)
     if alert.indicator.endswith("_exchange_spread"):
         return _data_lines_for_exchange_spread(alert, history)
+    if alert.indicator.endswith("_open_interest"):
+        return _data_lines_for_open_interest(alert, history)
     if alert.indicator in DIFFUSION_INDEX_INDICATORS:
         return _data_lines_for_diffusion_index(alert, history)
     lines: list[str] = []
@@ -757,11 +1036,15 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
 def _headline_name(alert: AlertTrigger, *, major: bool, history: MoveHistory | None = None) -> str:
     history = history or MoveHistory()
     if alert.indicator.endswith("_liquidations"):
-        return _liquidation_headline(alert)
+        return _liquidation_headline(alert, history)
     if alert.indicator.endswith("_funding"):
-        return _funding_headline(alert)
+        return _funding_headline(alert, history)
     if alert.indicator.endswith("_basis"):
-        return _basis_headline(alert)
+        return _basis_headline(alert, history)
+    if alert.indicator.endswith("_open_interest"):
+        return _open_interest_headline(alert, history)
+    if alert.indicator.endswith("_exchange_spread"):
+        return _exchange_spread_headline(alert, history)
     if alert.indicator == "fear_greed":
         return _sentiment_headline(alert)
     return _event_headline(alert, history)
@@ -776,11 +1059,15 @@ def _headline_for_alert(
 ) -> str:
     history = history or MoveHistory()
     if alert.indicator.endswith("_liquidations"):
-        return f"{emoji}{_liquidation_headline(alert)}".strip()
+        return f"{emoji}{_liquidation_headline(alert, history)}".strip()
     if alert.indicator.endswith("_funding"):
-        return f"{emoji}{_funding_headline(alert)}".strip()
+        return f"{emoji}{_funding_headline(alert, history)}".strip()
     if alert.indicator.endswith("_basis"):
-        return f"{emoji}{_basis_headline(alert)}".strip()
+        return f"{emoji}{_basis_headline(alert, history)}".strip()
+    if alert.indicator.endswith("_open_interest"):
+        return f"{emoji}{_open_interest_headline(alert, history)}".strip()
+    if alert.indicator.endswith("_exchange_spread"):
+        return f"{emoji}{_exchange_spread_headline(alert, history)}".strip()
     if alert.indicator == "fear_greed":
         return f"{emoji}{_sentiment_headline(alert)}".strip()
     if history.is_all_time_high:
@@ -890,8 +1177,8 @@ def _context_fallback(alert: AlertTrigger, history: MoveHistory) -> str | None:
             word = "gain" if _direction_up(alert) else "decline"
             return f"Largest housing {word} in {history.days_since_larger_move} days."
         return "Housing market repricing."
-    if ind.endswith("_basis"):
-        return _basis_context(alert, history)
+    if ind.endswith(("_basis", "_funding", "_exchange_spread", "_open_interest", "_liquidations")):
+        return _crypto_context_line(alert, history)
     if ind == "fear_greed":
         return _sentiment_context(alert, history)
     return "Move stands out vs recent baseline."
@@ -942,16 +1229,18 @@ def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None)
             return "growth expectations improving"
         return "growth expectations in flux"
     if ind.endswith("_basis"):
-        return _basis_takeaway(alert)
+        return _basis_takeaway(alert, history)
     if ind == "fear_greed":
         return _sentiment_takeaway(alert)
     if ind.endswith("_funding"):
-        return _funding_takeaway(alert)
+        return _funding_takeaway(alert, history)
     if ind.endswith("_exchange_spread"):
-        return _exchange_spread_takeaway(alert)
+        return _exchange_spread_takeaway(alert, history)
+    if ind.endswith("_open_interest"):
+        return _open_interest_takeaway(alert, history)
     if ind.endswith("_liquidations"):
-        return _liquidation_takeaway(alert)
-    return "market structure shifting across assets"
+        return _liquidation_takeaway(alert, history)
+    return "conditions shifted vs the recent baseline"
 
 
 def _takeaway_line(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
@@ -973,6 +1262,12 @@ def _format_value(alert: AlertTrigger) -> str:
     if alert.indicator.endswith(("_basis", "_exchange_spread")):
         return f"{v:.1f} bps"
     if alert.indicator.endswith("_liquidations"):
+        if v >= 1_000_000:
+            return f"${v / 1_000_000:.1f}M"
+        return f"${v:,.0f}"
+    if alert.indicator.endswith("_open_interest"):
+        if v >= 1_000_000_000:
+            return f"${v / 1_000_000_000:.2f}B"
         if v >= 1_000_000:
             return f"${v / 1_000_000:.1f}M"
         return f"${v:,.0f}"
@@ -1080,6 +1375,8 @@ def _multi_data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> li
         label = f"{base} basis"
     elif ind.endswith("_exchange_spread"):
         label = f"{base} spread"
+    elif ind.endswith("_open_interest"):
+        label = f"{base} OI"
     elif ind.endswith("_liquidations"):
         label = f"{base} liqs"
     else:
@@ -1113,19 +1410,19 @@ def _emoji_for_post(
     standout: bool,
     is_emergency: bool,
 ) -> str:
-    """At most one emoji for exceptional moves."""
+    """At most one emoji — only on truly standout moves."""
     if is_emergency or alert.alert_tier == "emergency":
-        return "🚨 "
-    if alert.indicator.endswith("_liquidations"):
         return "🚨 "
     if history.is_all_time_high:
         return "🔥 "
+    if history.days_since_larger_move and history.days_since_larger_move >= 30:
+        return "🚨 "
+    if alert.indicator.endswith("_liquidations") and alert.alert_tier == "major":
+        return "🚨 "
     if alert.indicator == "yield_curve" and _cross_direction(alert) == "below":
         return "⚠️ "
     if alert.indicator == "vix" and (alert.value >= 30 or _cross_direction(alert) == "above"):
         return "⚠️ "
-    if alert.indicator in PRICE_INDICATORS and standout and alert.alert_tier in ("major", "emergency"):
-        return "📈 " if _direction_up(alert) else "📉 "
     return ""
 
 
@@ -1139,8 +1436,8 @@ def _multi_emoji(
     """Pick at most one emoji for a grouped post; exceptional moves only."""
     if is_emergency or any(a.alert_tier == "emergency" for a in alerts):
         return "🚨 "
-    if any(a.indicator.endswith("_liquidations") for a in alerts):
-        return "🚨 "
+    if any(histories.get(a.indicator, MoveHistory()).is_all_time_high for a in alerts):
+        return "🔥 "
     return ""
 
 
@@ -1196,10 +1493,10 @@ def _template_funding(
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
     return _assemble_tweet(
-        headline=f"{emoji}{_funding_headline(alert)}".strip(),
+        headline=f"{emoji}{_funding_headline(alert, history)}".strip(),
         data_lines=_data_lines_for_funding(alert, history),
-        context=_funding_context(alert, history),
-        takeaway=_funding_takeaway(alert),
+        context=_crypto_context_line(alert, history),
+        takeaway=_funding_takeaway(alert, history),
     )
 
 
@@ -1213,10 +1510,10 @@ def _template_basis(
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
     return _assemble_tweet(
-        headline=f"{emoji}{_basis_headline(alert)}".strip(),
+        headline=f"{emoji}{_basis_headline(alert, history)}".strip(),
         data_lines=_data_lines_for_basis(alert, history),
-        context=_basis_context(alert, history),
-        takeaway=_basis_takeaway(alert),
+        context=_crypto_context_line(alert, history),
+        takeaway=_basis_takeaway(alert, history),
     )
 
 
@@ -1237,6 +1534,23 @@ def _template_sentiment(
     )
 
 
+def _template_open_interest(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
+    emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
+    return _assemble_tweet(
+        headline=f"{emoji}{_open_interest_headline(alert, history)}".strip(),
+        data_lines=_data_lines_for_open_interest(alert, history),
+        context=_crypto_context_line(alert, history),
+        takeaway=_open_interest_takeaway(alert, history),
+    )
+
+
 def _template_exchange_spread(
     alert: AlertTrigger,
     history: MoveHistory,
@@ -1247,10 +1561,10 @@ def _template_exchange_spread(
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
     return _assemble_tweet(
-        headline=f"{emoji}{_exchange_spread_headline(alert)}".strip(),
+        headline=f"{emoji}{_exchange_spread_headline(alert, history)}".strip(),
         data_lines=_data_lines_for_exchange_spread(alert, history),
-        context=_exchange_spread_context(alert, history),
-        takeaway=_exchange_spread_takeaway(alert),
+        context=_crypto_context_line(alert, history),
+        takeaway=_exchange_spread_takeaway(alert, history),
     )
 
 
@@ -1265,10 +1579,10 @@ def _template_liquidation(
     standout = _is_standout(alert, history, posting_cfg, is_emergency=is_emergency)
     emoji = _emoji_for_post(alert, history, posting_cfg, standout=standout, is_emergency=is_emergency)
     return _assemble_tweet(
-        headline=_headline_for_alert(alert, major=False, emoji=emoji),
+        headline=_headline_for_alert(alert, major=False, emoji=emoji, history=history),
         data_lines=_data_lines_for_liquidation(alert, history),
-        context=_liquidation_context(alert, history),
-        takeaway=_liquidation_takeaway(alert),
+        context=_crypto_context_line(alert, history),
+        takeaway=_liquidation_takeaway(alert, history),
     )
 
 
@@ -1318,6 +1632,9 @@ def _pick_single_template(
     if alert.indicator.endswith("_exchange_spread"):
         return _template_exchange_spread(alert, history, posting_cfg, is_emergency=is_emergency)
 
+    if alert.indicator.endswith("_open_interest"):
+        return _template_open_interest(alert, history, posting_cfg, is_emergency=is_emergency)
+
     if is_emergency or alert.alert_tier == "emergency":
         return _template_major_move(alert, history, posting_cfg, is_emergency=True)
 
@@ -1345,7 +1662,7 @@ def compose_single_tweet(
     return _pick_single_template(alert, history, posting_cfg, is_emergency=is_emergency)
 
 
-CHART_ALWAYS_SUFFIXES = ("_liquidations", "_basis", "_exchange_spread", "_funding")
+CHART_ALWAYS_SUFFIXES = ("_liquidations", "_basis", "_exchange_spread", "_funding", "_open_interest")
 VOLATILITY_INDICATORS = frozenset({"vix", "move"})
 
 

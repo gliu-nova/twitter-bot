@@ -70,6 +70,27 @@ SHORT_NAMES: dict[str, str] = {
     "btc_liquidations": "BTC Liqs",
     "eth_liquidations": "ETH Liqs",
     "sol_liquidations": "SOL Liqs",
+    "btc_open_interest": "BTC OI",
+    "eth_open_interest": "ETH OI",
+    "sol_open_interest": "SOL OI",
+}
+
+CHART_FRIENDLY_TITLES: dict[str, str] = {
+    "btc_exchange_spread": "BTC Coinbase vs Kraken Price Difference",
+    "eth_exchange_spread": "ETH Coinbase vs Kraken Price Difference",
+    "sol_exchange_spread": "SOL Coinbase vs Kraken Price Difference",
+    "btc_funding": "BTC Perpetual Funding Rate",
+    "eth_funding": "ETH Perpetual Funding Rate",
+    "sol_funding": "SOL Perpetual Funding Rate",
+    "btc_basis": "BTC Futures vs Spot Premium",
+    "eth_basis": "ETH Futures vs Spot Premium",
+    "sol_basis": "SOL Futures vs Spot Premium",
+    "btc_liquidations": "BTC 1H Liquidations (Long vs Short)",
+    "eth_liquidations": "ETH 1H Liquidations (Long vs Short)",
+    "sol_liquidations": "SOL 1H Liquidations (Long vs Short)",
+    "btc_open_interest": "BTC Open Interest",
+    "eth_open_interest": "ETH Open Interest",
+    "sol_open_interest": "SOL Open Interest",
 }
 
 THEME_SUBTITLES: dict[str, str] = {
@@ -153,6 +174,67 @@ def _chart_history(
     return daily_readings_since(conn, alert.indicator, months=months)
 
 
+def chart_title_for_alert(alert: AlertTrigger, dates: list[datetime] | None = None) -> str:
+    base = CHART_FRIENDLY_TITLES.get(alert.indicator, alert.name)
+    if not dates or len(dates) < 2:
+        return base
+    if alert.indicator.endswith("_liquidations"):
+        return _liquidation_chart_title(alert, dates)
+    return _chart_title(alert, dates)
+
+
+def chart_latest_value_label(alert: AlertTrigger, value: float) -> str:
+    return _format_chart_value(alert, value)
+
+
+def chart_supports_narrative(alert: AlertTrigger, values: list[float]) -> bool:
+    """Chart must visually support the posted move; otherwise prefer text-only."""
+    if len(values) < 2:
+        return False
+
+    latest = values[-1]
+    prior = values[-2]
+
+    if alert.indicator.endswith("_funding"):
+        if alert.value < -0.00001:
+            return latest <= 0.00003 or min(values[-min(8, len(values)):]) <= 0.00003
+        if alert.value > 0.00003:
+            return latest >= prior
+        return True
+
+    if alert.indicator.endswith("_exchange_spread"):
+        if alert.prev_value is not None and alert.value < alert.prev_value:
+            return latest <= prior
+        if alert.prev_value is not None and alert.value > alert.prev_value:
+            return latest >= prior
+        return True
+
+    if alert.indicator.endswith("_basis"):
+        if alert.value < 0:
+            return latest < 0 or min(values[-min(8, len(values)):]) < 0
+        if alert.prev_value is not None:
+            if alert.value > alert.prev_value:
+                return latest >= prior
+            if alert.value < alert.prev_value:
+                return latest <= prior
+        return True
+
+    if alert.indicator.endswith("_liquidations"):
+        if alert.prev_value is not None and alert.value > alert.prev_value:
+            return latest >= prior
+        return True
+
+    if alert.indicator.endswith("_open_interest"):
+        if alert.prev_value is not None:
+            if alert.value > alert.prev_value:
+                return latest >= prior
+            if alert.value < alert.prev_value:
+                return latest <= prior
+        return True
+
+    return True
+
+
 def _format_chart_value(alert: AlertTrigger, value: float) -> str:
     if alert.indicator.endswith("_liquidations"):
         if value >= 1_000_000:
@@ -164,6 +246,12 @@ def _format_chart_value(alert: AlertTrigger, value: float) -> str:
         return f"{value * 100:.4f}%"
     if alert.indicator.endswith(("_basis", "_exchange_spread")):
         return f"{value:.1f} bps"
+    if alert.indicator.endswith("_open_interest"):
+        if value >= 1_000_000_000:
+            return f"${value / 1_000_000_000:.2f}B"
+        if value >= 1_000_000:
+            return f"${value / 1_000_000:.1f}M"
+        return f"${value:,.0f}"
     if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
         return f"{value:.2f}%"
     if value >= 1000:
@@ -175,9 +263,13 @@ def _y_axis_label(alert: AlertTrigger) -> str:
     if alert.indicator.endswith("_liquidations"):
         return "1H Liquidations (USD)"
     if alert.indicator.endswith("_funding"):
-        return "Funding Rate"
-    if alert.indicator.endswith(("_basis", "_exchange_spread")):
-        return "Basis (bps)"
+        return "Funding rate (per 8h)"
+    if alert.indicator.endswith("_exchange_spread"):
+        return "Price gap (bps)"
+    if alert.indicator.endswith("_basis"):
+        return "Futures vs spot (bps)"
+    if alert.indicator.endswith("_open_interest"):
+        return "Open interest (USD)"
     if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
         return "Level (%)"
     return alert.name
@@ -201,35 +293,37 @@ def _y_tick_formatter(alert: AlertTrigger):
 
 
 def _chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
+    base = CHART_FRIENDLY_TITLES.get(alert.indicator, alert.name)
     if len(dates) < 2:
-        return alert.name
+        return base
     span = dates[-1] - dates[0]
     span_hours = max(span.total_seconds() / 3600, 1)
     if span_hours < 48:
-        return f"{alert.name} — Last {int(span_hours)}h"
+        return f"{base} — Last {int(span_hours)}h"
     span_days = max(span.days, 1)
     if span_days < 14:
-        return f"{alert.name} — Last {span_days}d"
+        return f"{base} — Last {span_days}d"
     if span_days < 120:
-        return f"{alert.name} — Last {span_days // 30 or 1}mo"
-    return f"{alert.name} — 6 Month"
+        return f"{base} — Last {span_days // 30 or 1}mo"
+    return f"{base} — 6 Month"
 
 
 def _liquidation_chart_title(alert: AlertTrigger, dates: list[datetime]) -> str:
+    base = CHART_FRIENDLY_TITLES.get(alert.indicator, alert.name)
     if len(dates) < 2:
-        return alert.name
+        return base
     max_gap_h = max(
         (dates[i + 1] - dates[i]).total_seconds() / 3600 for i in range(len(dates) - 1)
     )
     if max_gap_h > 36:
-        return f"{alert.name} — Last {len(dates)} readings"
+        return f"{base} — Last {len(dates)} readings"
     span_hours = max((dates[-1] - dates[0]).total_seconds() / 3600, 1)
     if span_hours < 48:
-        return f"{alert.name} — Last {int(span_hours)}h"
+        return f"{base} — Last {int(span_hours)}h"
     span_days = max((dates[-1] - dates[0]).days, 1)
     if span_days < 14:
-        return f"{alert.name} — Last {span_days}d"
-    return f"{alert.name} — Last {len(dates)} readings"
+        return f"{base} — Last {span_days}d"
+    return f"{base} — Last {len(dates)} readings"
 
 
 def _liquidation_side_vals(
@@ -311,6 +405,48 @@ def _configure_x_axis(ax, dates: list[datetime]) -> None:
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right")
 
 
+def _annotate_move(
+    ax,
+    x_from: float,
+    y_from: float,
+    x_to: float,
+    y_to: float,
+    *,
+    label: str,
+    color: str = HIGHLIGHT_EDGE,
+) -> None:
+    ax.annotate(
+        "",
+        xy=(x_to, y_to),
+        xytext=(x_from, y_from),
+        arrowprops={
+            "arrowstyle": "->",
+            "color": color,
+            "linewidth": 2.5,
+            "shrinkA": 4,
+            "shrinkB": 6,
+        },
+        zorder=7,
+    )
+    ax.text(
+        x_to,
+        y_to,
+        label,
+        color=color,
+        fontsize=9,
+        fontweight="bold",
+        ha="left",
+        va="bottom",
+        bbox={
+            "boxstyle": "round,pad=0.2",
+            "facecolor": BG,
+            "edgecolor": color,
+            "alpha": 0.9,
+        },
+        zorder=8,
+    )
+
+
 def _annotate_latest(ax, x: float, y: float, *, color: str = HIGHLIGHT_EDGE) -> None:
     ax.annotate(
         "LATEST",
@@ -361,6 +497,8 @@ def render_line_chart(
 
     dates = [_to_et(_parse_chart_date(d)) for d, _ in series]
     values = [v for _, v in series]
+    if not chart_supports_narrative(alert, values):
+        return None
 
     up = alert.prev_value is not None and alert.value >= (alert.prev_value or alert.value)
     line_color = GREEN if up else RED
@@ -411,7 +549,39 @@ def render_line_chart(
         edgecolors=HIGHLIGHT_EDGE,
         linewidths=3.0,
     )
-    _annotate_latest(ax, mdates.date2num(dates[-1]), values[-1])
+    last_x = mdates.date2num(dates[-1])
+    _annotate_latest(ax, last_x, values[-1])
+
+    if alert.indicator.endswith("_funding"):
+        ax.axhline(y=0, color=MUTED, linewidth=1.2, linestyle="--", alpha=0.7, zorder=1)
+        if alert.value < -0.00001:
+            _annotate_move(
+                ax,
+                mdates.date2num(dates[-2]),
+                values[-2],
+                last_x,
+                values[-1],
+                label="FLIP BELOW 0",
+            )
+    elif len(values) >= 2 and alert.prev_value is not None:
+        if alert.value < alert.prev_value:
+            _annotate_move(
+                ax,
+                mdates.date2num(dates[-2]),
+                values[-2],
+                last_x,
+                values[-1],
+                label="COMPRESSION",
+            )
+        elif alert.value > alert.prev_value:
+            _annotate_move(
+                ax,
+                mdates.date2num(dates[-2]),
+                values[-2],
+                last_x,
+                values[-1],
+                label="WIDENING",
+            )
 
     data_hi = max(values)
     data_lo = min(values)
@@ -463,6 +633,9 @@ def render_liquidation_chart(
         return None
 
     rows = _trim_liquidation_chart_rows(rows)
+    totals_preview = [total for _, total, _, _ in rows]
+    if not chart_supports_narrative(alert, totals_preview):
+        return None
     dates = [_to_et(_parse_chart_date(ts)) for ts, _, _, _ in rows]
     long_vals, short_vals, totals = _liquidation_side_vals(rows)
 
@@ -613,7 +786,8 @@ def chart_for_decision(
 ) -> Path | None:
     posting_cfg = posting_cfg or cfg.get("posting") or {}
     if tweet_type == "multi":
-        return render_multi_card(alerts, theme)
+        # Generic theme cards don't support single-metric narratives — prefer text-only.
+        return None
     if len(alerts) != 1:
         return None
 

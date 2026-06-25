@@ -19,13 +19,18 @@ from src.db import (
     record_alert,
     record_post,
 )
-from src.posting.charts import chart_for_decision
+from src.posting.charts import (
+    chart_for_decision,
+    chart_latest_value_label,
+    chart_title_for_alert,
+)
 from src.posting.compose import (
     compose_multi_tweet,
     compose_single_tweet,
     hydrate_liq_from_reasons,
     liq_breakdown_tokens,
     should_attach_chart,
+    validate_post_before_send,
 )
 from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
@@ -454,6 +459,23 @@ def process_posting_queue(
             is_emergency=decision.is_emergency,
             posting_cfg=posting_cfg,
         )
+        primary = decision.alerts[0]
+        chart_title = chart_title_for_alert(primary) if chart_path else None
+        chart_latest = chart_latest_value_label(primary, primary.value) if chart_path else None
+        validation = validate_post_before_send(
+            text,
+            primary,
+            chart_title=chart_title,
+            chart_latest_value=chart_latest,
+        )
+        if not validation.ok:
+            chart_issues = [i for i in validation.issues if "chart" in i.lower()]
+            text_issues = [i for i in validation.issues if i not in chart_issues]
+            if chart_path and chart_issues:
+                print(f"[posting] chart validation failed — text-only: {chart_issues}")
+                chart_path = None
+            if text_issues:
+                print(f"[posting] post validation warnings: {text_issues}")
         if chart_path:
             print(f"[posting] chart: {chart_path}")
         elif decision.tweet_type == "single":
