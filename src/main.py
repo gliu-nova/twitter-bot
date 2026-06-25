@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from src.alerts import check_alert
 from src.config import ROOT, indicator_settings, load_config
-from src.db import connect, has_pending_alert, last_reading, save_reading
+from src.db import connect, emergency_posts_last_24h, has_pending_alert, last_reading, posts_today, save_reading
 from src.market_hours import off_hours_equity_alert_action
 from src.fetch import FetchError, fetch_indicator
 from src.posting import enqueue_alert, process_posting_queue
@@ -209,10 +209,14 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     try:
         from src.ops_heartbeat import push_ops_heartbeat
 
+        posting_cfg = cfg.get("posting") or {}
         push_ops_heartbeat(
             health=health,
             sync_report=sync_report,
             posted_tweets=posted,
+            posts_today=posts_today(conn),
+            daily_post_cap=int(posting_cfg.get("daily_post_cap", 8)),
+            emergency_posts_last_24h=emergency_posts_last_24h(conn),
             skipped_indicators=len(skipped_indicators),
             trigger=os.environ.get("BOT_TRIGGER_SOURCE", "local"),
         )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -241,6 +241,15 @@ def posts_today(conn: sqlite3.Connection) -> int:
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM post_log WHERE posted_at LIKE ? AND is_emergency = 0",
         (f"{today}%",),
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def emergency_posts_last_24h(conn: sqlite3.Connection) -> int:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM post_log WHERE posted_at >= ? AND is_emergency = 1",
+        (cutoff,),
     ).fetchone()
     return int(row["n"]) if row else 0
 

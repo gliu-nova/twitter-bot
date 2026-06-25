@@ -14,6 +14,9 @@ def push_ops_heartbeat(
     health: dict[str, str],
     sync_report: dict[str, Any] | None,
     posted_tweets: int,
+    posts_today: int,
+    daily_post_cap: int,
+    emergency_posts_last_24h: int,
     skipped_indicators: int,
     trigger: str = "unknown",
 ) -> None:
@@ -42,13 +45,18 @@ def push_ops_heartbeat(
         "status": status,
         "reported_at": datetime.now(timezone.utc).isoformat(),
         "summary": (
-            f"posted={posted_tweets}, skipped_indicators={skipped_indicators}, "
+            f"posted={posts_today}/{daily_post_cap} today, "
+            f"emergency_24h={emergency_posts_last_24h}, "
+            f"run_posts={posted_tweets}, skipped_indicators={skipped_indicators}, "
             f"apis_unhealthy={len(bad_apis)}"
         ),
         "details": {
             "trigger": trigger,
             "api_health": health,
             "posted_tweets": posted_tweets,
+            "posts_today": posts_today,
+            "daily_post_cap": daily_post_cap,
+            "emergency_posts_last_24h": emergency_posts_last_24h,
             "skipped_indicators": skipped_indicators,
             "market_memory": mm_summary,
         },
