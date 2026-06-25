@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,17 @@ INDICATOR_MEMORY_MAP: dict[str, dict[str, Any]] = {
     )
     if (mapping := memory_query_for_indicator(key)) is not None
 }
+
+
+@dataclass
+class MemoryContextResult:
+    line: str | None = None
+    eligible: bool = False
+    queried: bool = False
+    skip_reason: str | None = None
+    reject_reason: str | None = None
+    occurrences: int | None = None
+    percentile: float | None = None
 
 
 def _resolve_data_dir(cfg: dict[str, Any]) -> Path:
@@ -103,26 +115,57 @@ def build_similarity_query(alert: Any, cfg: dict[str, Any]) -> SimilarityQuery |
     )
 
 
-def memory_context_line(alert: Any, cfg: dict[str, Any]) -> str | None:
-    """Return a tweet context line from market-memory when it adds real signal."""
+def memory_context_eligible(alert: Any, cfg: dict[str, Any] | None) -> bool:
+    if not cfg or not memory_enabled(cfg):
+        return False
+    return alert.indicator in INDICATOR_MEMORY_MAP
+
+
+def memory_context_decision(alert: Any, cfg: dict[str, Any] | None) -> MemoryContextResult:
+    """Resolve market-memory context with structured eligibility/query outcome."""
+    result = MemoryContextResult()
+    if not cfg:
+        result.skip_reason = "no_compose_cfg"
+        return result
     if not memory_enabled(cfg):
-        return None
+        result.skip_reason = "memory_disabled"
+        return result
+    mapping = INDICATOR_MEMORY_MAP.get(alert.indicator)
+    if not mapping:
+        result.skip_reason = "indicator_not_mapped"
+        return result
+    result.eligible = True
     query = build_similarity_query(alert, cfg)
     if not query:
-        return None
+        result.skip_reason = "query_build_failed"
+        return result
     mm_cfg = cfg.get("market_memory") or {}
     min_occurrences = int(mm_cfg.get("min_occurrences", 3))
+    result.queried = True
     db = EventDB(data_dir=str(_resolve_data_dir(cfg)))
     try:
         ctx = db.tweet_context(query, current_value=float(alert.value))
+    except Exception as exc:
+        result.reject_reason = f"query_error:{type(exc).__name__}"
+        return result
     finally:
         db.close()
+    result.occurrences = ctx.occurrences
+    result.percentile = ctx.percentile
     if ctx.occurrences < min_occurrences:
-        return None
+        result.reject_reason = f"occurrences_below_min:{ctx.occurrences}<{min_occurrences}"
+        return result
     if ctx.percentile is not None:
         if not (ctx.percentile >= 90 or ctx.percentile <= 10 or ctx.occurrences >= 8):
-            return None
-    return ctx.tweet_context
+            result.reject_reason = f"percentile_not_extreme:pct={ctx.percentile}"
+            return result
+    result.line = ctx.tweet_context
+    return result
+
+
+def memory_context_line(alert: Any, cfg: dict[str, Any]) -> str | None:
+    """Return a tweet context line from market-memory when it adds real signal."""
+    return memory_context_decision(alert, cfg).line
 
 
 def maybe_sync_market_memory(cfg: dict[str, Any]) -> dict[str, Any] | None:

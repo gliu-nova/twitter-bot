@@ -32,10 +32,14 @@ from src.posting.compose import (
     should_attach_chart,
     validate_post_before_send,
 )
+from src.posting.context_explain import (
+    SkippedPostCandidate,
+    finalize_context_explain_logs,
+)
 from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
 from src.posting.grouping import filter_stale_alerts
-from src.posting.models import AlertTrigger
+from src.posting.models import AlertTrigger, TweetDecision
 from src.posting.scoring import apply_session_score_adjustments, calculate_score
 from src.twitter_client import post_tweet
 
@@ -289,6 +293,29 @@ def _log_buffered_alerts(
         print(f"    why buffered: {wait}")
 
 
+def _post_threshold_for_decision(decision: TweetDecision, posting_cfg: dict[str, Any]) -> float:
+    if decision.tweet_type == "multi":
+        return float(posting_cfg.get("multi_threshold", 120))
+    return float(posting_cfg.get("high_single_threshold", 85))
+
+
+def _primary_decision_alert(decision: TweetDecision) -> AlertTrigger:
+    return max(decision.alerts, key=lambda alert: alert.score)
+
+
+def _buffer_batch_for_alert(
+    alert: AlertTrigger,
+    session_market: list[AlertTrigger],
+    anytime_market: list[AlertTrigger],
+    macro_alerts: list[AlertTrigger],
+) -> str:
+    if alert in macro_alerts:
+        return "macro"
+    if alert in anytime_market:
+        return "anytime"
+    return "session"
+
+
 def _prefer_macro_alternative(
     decisions: list[Any],
     all_alerts: list[AlertTrigger],
@@ -382,6 +409,8 @@ def process_posting_queue(
     if anytime_market and (force or _should_flush_anytime_market(anytime_market, posting_cfg, now_utc)):
         batches.append(("anytime", anytime_market))
 
+    skipped_candidates: list[SkippedPostCandidate] = []
+
     if not batches:
         _log_buffered_alerts(
             session_market,
@@ -391,12 +420,44 @@ def process_posting_queue(
             now_utc=now_utc,
             now_et=now_et,
         )
+        all_pending = session_market + anytime_market + macro_alerts
+        if all_pending:
+            top = max(all_pending, key=lambda alert: alert.score)
+            batch = _buffer_batch_for_alert(
+                top, session_market, anytime_market, macro_alerts,
+            )
+            skipped_candidates.append(
+                SkippedPostCandidate(
+                    alert=top,
+                    skip_reason=_buffer_wait_reason(
+                        top, batch, posting_cfg, now_utc=now_utc, now_et=now_et,
+                    ),
+                    score=top.score,
+                    post_threshold=float(posting_cfg.get("high_single_threshold", 85)),
+                ),
+            )
+        finalize_context_explain_logs(
+            posted=0,
+            skipped_candidates=skipped_candidates,
+            conn=conn,
+            cfg=cfg,
+        )
         return 0
 
     posted = 0
     for batch_name, raw_alerts in batches:
         alerts = filter_stale_alerts(raw_alerts, posting_cfg, now_utc)
         if not alerts:
+            if raw_alerts:
+                top = max(raw_alerts, key=lambda alert: alert.score)
+                skipped_candidates.append(
+                    SkippedPostCandidate(
+                        alert=top,
+                        skip_reason="stale:all_alerts_expired",
+                        score=top.score,
+                        post_threshold=float(posting_cfg.get("high_single_threshold", 85)),
+                    ),
+                )
             mark_alerts_processed(conn, [a.db_id for a in raw_alerts if a.db_id])
             continue
 
@@ -423,12 +484,28 @@ def process_posting_queue(
         ]
         if not filtered:
             print("[posting] all alerts in cooldown — skipping (keeping in queue)")
+            skipped_candidates.append(
+                SkippedPostCandidate(
+                    alert=_primary_decision_alert(decision),
+                    skip_reason="cooldown:all_alerts_in_cooldown",
+                    score=decision.score,
+                    post_threshold=_post_threshold_for_decision(decision, posting_cfg),
+                ),
+            )
             continue
         decision.alerts = filtered
 
         # Daily cap (emergency bypasses)
         if not decision.is_emergency and _daily_cap_reached(conn, posting_cfg):
             print(f"[posting] daily cap ({posting_cfg.get('daily_post_cap', 8)}) reached — skipping")
+            skipped_candidates.append(
+                SkippedPostCandidate(
+                    alert=_primary_decision_alert(decision),
+                    skip_reason="daily_cap_reached",
+                    score=decision.score,
+                    post_threshold=_post_threshold_for_decision(decision, posting_cfg),
+                ),
+            )
             continue
 
         if decision.tweet_type == "multi":
@@ -522,4 +599,10 @@ def process_posting_queue(
             print("[posting] daily cap reached after post — stopping")
             break
 
+    finalize_context_explain_logs(
+        posted=posted,
+        skipped_candidates=skipped_candidates,
+        conn=conn,
+        cfg=cfg,
+    )
     return posted

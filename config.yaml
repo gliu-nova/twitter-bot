@@ -23,6 +23,8 @@ market_memory:
 # Posting engine — scoring, grouping, daily cap, buffers.
 # Threshold rules per indicator are still edited under `indicators:` below.
 posting:
+  explain_context: true      # log structured context source per tweet; EXPLAIN_CONTEXT=1 overrides
+  explain_skipped_top_n: 1   # when no post, log top N skipped context explains; EXPLAIN_SKIPPED_TOP_N; 0=off
   daily_post_cap: 8          # regular posts only; emergencies bypass this cap
   # indicator_cooldown_hours: global min between posts per indicator (non-emergency).
   # Emergencies honor each indicator's cooldown_hours (24h for liquidations).

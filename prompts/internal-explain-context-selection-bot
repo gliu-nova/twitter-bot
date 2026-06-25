@@ -1,0 +1,86 @@
+Add an internal explain/debug mode for tweet context selection.
+
+Goal:
+I want to understand why each tweet uses SQLite MoveHistory context, market-memory context, or a fallback template. This should not change the public tweet output unless explicitly enabled for debugging.
+
+Requirements:
+1. Add a structured ContextDecision / ContextExplain object that records valuable information such as:
+   - indicator
+   - asset
+   - alert value
+   - context candidates considered
+   - whether SQLite MoveHistory produced a rarity/context line
+   - whether market-memory was eligible
+   - whether market-memory was queried
+   - if market-memory was skipped, why
+   - if market-memory was rejected, why
+   - number of similar events found if available
+   - selected context source: sqlite_rarity, market_memory, template_fallback, none
+   - selected context line
+
+2. Integrate this into the existing compose/posting flow:
+
+3. Add logging controlled by config/env:
+   - config option: posting.explain_context: true/false
+   - env override: EXPLAIN_CONTEXT=1
+   When enabled, log one compact structured block per composed tweet.
+
+4. Do not make market-memory more aggressive yet.
+   This task is observability only.
+   Keep existing tweet wording and source priority the same:
+   SQLite MoveHistory rarity/context first, then market-memory where currently wired, then fallback template.
+
+5. Add tests for:
+   - memory skipped because SQLite rarity exists
+   - memory queried and selected
+   - memory rejected because too few occurrences / thresholds
+   - fallback selected when neither SQLite nor memory provides context
+   - explain mode disabled by default
+
+6. Keep logs concise and readable in GitHub Actions.
+   Prefer JSON or key=value lines.
+
+
+   Modify explain/debug logging behavior for context decisions.
+
+Current behavior:
+- Explain logs only appear when a tweet is actually posted.
+
+Desired behavior:
+1. If a tweet is posted:
+   - Keep current behavior.
+   - Log explanation only for the posted tweet.
+   - Do not also log skipped candidates.
+
+2. If no tweet is posted:
+   - Log explain output for the top skipped candidate(s).
+   - Default to top 1 skipped candidate.
+   - Add config option: posting.explain_skipped_top_n, default 1.
+   - Add env override: EXPLAIN_SKIPPED_TOP_N.
+   - If value is 0, disable skipped explain logs.
+
+3. Skipped explain logs should include:
+   - indicator
+   - asset
+   - alert value
+   - score / priority if available
+   - post threshold if available
+   - skip reason
+   - whether market-memory was eligible
+   - whether market-memory was queried
+   - why market-memory was skipped or rejected
+   - what context line would have been selected if it had posted, if available
+
+4. Only log skipped explanations when normal explain mode is enabled:
+   - posting.explain_context: true
+   - or EXPLAIN_CONTEXT=1
+
+5. Do not change posting decisions.
+6. Do not change tweet wording.
+7. Do not query market-memory for every skipped alert unless needed for the top N skipped candidates.
+8. Add/update tests for:
+   - posted tweet logs only posted explanation
+   - no-post run logs top 1 skipped explanation by default
+   - explain_skipped_top_n controls number of skipped candidates
+   - explain_skipped_top_n=0 disables skipped explanations
+   - skipped explanations only appear when explain_context is enabled

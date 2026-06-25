@@ -17,15 +17,40 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.posting.context_explain import (
+    ContextDecision,
+    explain_context_enabled,
+    log_context_decision,
+)
 from src.posting.history import MoveHistory
 from src.posting.models import AlertTrigger
 
 _COMPOSE_CFG: dict[str, Any] | None = None
+_ACTIVE_CONTEXT_DECISION: ContextDecision | None = None
 
 
 def _set_compose_cfg(cfg: dict[str, Any] | None) -> None:
     global _COMPOSE_CFG
     _COMPOSE_CFG = cfg
+
+
+def _context_decision() -> ContextDecision | None:
+    return _ACTIVE_CONTEXT_DECISION
+
+
+def _record_memory_result(result: Any, *, skip_reason: str | None = None) -> str | None:
+    decision = _context_decision()
+    if decision is not None:
+        decision.note_candidate("market_memory")
+        decision.apply_memory_fields(
+            eligible=result.eligible,
+            queried=result.queried,
+            skip_reason=skip_reason or result.skip_reason,
+            reject_reason=result.reject_reason,
+            occurrences=result.occurrences,
+            percentile=result.percentile,
+        )
+    return result.line
 
 JARGON_TERMS = (
     "cross-exchange arb gap",
@@ -581,24 +606,62 @@ def _has_crypto_rarity(alert: AlertTrigger, history: MoveHistory) -> bool:
 
 
 def _memory_context_line(alert: AlertTrigger) -> str | None:
-    if _COMPOSE_CFG is None:
-        return None
-    try:
-        from src.market_memory_bridge import memory_context_line
+    from src.market_memory_bridge import (
+        MemoryContextResult,
+        memory_context_decision,
+        memory_context_eligible,
+    )
 
-        return memory_context_line(alert, _COMPOSE_CFG)
-    except Exception:
-        return None
+    if _COMPOSE_CFG is None:
+        return _record_memory_result(MemoryContextResult(skip_reason="no_compose_cfg"))
+    try:
+        return _record_memory_result(memory_context_decision(alert, _COMPOSE_CFG))
+    except Exception as exc:
+        return _record_memory_result(
+            MemoryContextResult(
+                eligible=memory_context_eligible(alert, _COMPOSE_CFG),
+                queried=True,
+                reject_reason=f"query_error:{type(exc).__name__}",
+            ),
+        )
 
 
 def _crypto_context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    decision = _context_decision()
+    if decision is not None:
+        decision.note_candidate("sqlite_rarity")
+        decision.note_candidate("market_memory")
+        decision.note_candidate("template_fallback")
+
     rarity = _crypto_rarity_line(alert, history)
     if rarity:
+        if decision is not None:
+            from src.market_memory_bridge import memory_context_eligible
+
+            decision.select("sqlite_rarity", rarity, sqlite_branch="crypto_rarity")
+            if memory_context_eligible(alert, _COMPOSE_CFG):
+                decision.apply_memory_fields(
+                    eligible=True,
+                    queried=False,
+                    skip_reason="sqlite_rarity_selected",
+                )
         return rarity
+
     memory_line = _memory_context_line(alert)
     if memory_line:
+        if decision is not None:
+            decision.select("market_memory", memory_line)
         return memory_line
-    return _crypto_why_line(alert, history)
+
+    why = _crypto_why_line(alert, history)
+    if why:
+        if decision is not None:
+            decision.select("template_fallback", why, sqlite_branch="crypto_why")
+        return why
+
+    if decision is not None:
+        decision.select("none", None)
+    return None
 
 
 def _liquidation_headline(alert: AlertTrigger, history: MoveHistory) -> str:
@@ -869,13 +932,29 @@ def _data_lines_for_sentiment(alert: AlertTrigger, history: MoveHistory) -> list
 
 
 def _sentiment_context(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    decision = _context_decision()
+    if decision is not None:
+        decision.note_candidate("sqlite_rarity")
+        decision.note_candidate("template_fallback")
     if alert.value <= 25:
-        return "Fear & Greed at capitulation levels."
+        line = "Fear & Greed at capitulation levels."
+        if decision is not None:
+            decision.select("template_fallback", line, sqlite_branch="sentiment_capitulation")
+        return line
     if alert.value >= 75:
-        return "Fear & Greed at euphoria levels."
+        line = "Fear & Greed at euphoria levels."
+        if decision is not None:
+            decision.select("template_fallback", line, sqlite_branch="sentiment_euphoria")
+        return line
     if history.days_since_larger_move and history.days_since_larger_move >= 14:
-        return f"Largest sentiment shift in {history.days_since_larger_move} days."
-    return "Sentiment crossed a key threshold."
+        line = f"Largest sentiment shift in {history.days_since_larger_move} days."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="sentiment_days_since_larger")
+        return line
+    line = "Sentiment crossed a key threshold."
+    if decision is not None:
+        decision.select("template_fallback", line, sqlite_branch="sentiment_threshold")
+    return line
 
 
 def _sentiment_takeaway(alert: AlertTrigger) -> str:
@@ -1099,46 +1178,82 @@ def _headline_for_alert(
 
 
 def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    decision = _context_decision()
+    if decision is not None:
+        decision.note_candidate("sqlite_rarity")
+        decision.note_candidate("template_fallback")
+
     up = _direction_up(alert)
     if history.is_all_time_high:
         if history.prior_record is not None:
             prior = _format_value(AlertTrigger(
                 alert.indicator, alert.name, history.prior_record, None, [], [], [], "", False, alert.timestamp,
             ))
-            return f"New ATH — prior record {prior}."
-        return "New all-time high."
+            line = f"New ATH — prior record {prior}."
+        else:
+            line = "New all-time high."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="ath")
+        return line
     if history.level_extreme:
-        return _format_level_extreme(history.level_extreme)
+        line = _format_level_extreme(history.level_extreme)
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="level_extreme")
+        return line
     cross = _cross_context_line(alert, history)
     if cross:
         return cross
     if history.days_since_larger_move and history.days_since_larger_move >= 14:
         if alert.indicator in MACRO_INDICATORS or alert.is_macro:
             word = "increase" if up else "decline"
-            return f"Largest macro {word} in {history.days_since_larger_move} days."
-        word = "gain" if up else "decline"
-        return f"Largest {word} in {history.days_since_larger_move} days."
+            line = f"Largest macro {word} in {history.days_since_larger_move} days."
+        else:
+            word = "gain" if up else "decline"
+            line = f"Largest {word} in {history.days_since_larger_move} days."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="days_since_larger_14")
+        return line
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
         if alert.indicator in MACRO_INDICATORS or alert.is_macro:
             word = "increase" if up else "decline"
-            return f"Largest macro {word} in {history.days_since_larger_move} days."
-        word = "gain" if up else "decline"
-        return f"Largest {word} in {history.days_since_larger_move} days."
+            line = f"Largest macro {word} in {history.days_since_larger_move} days."
+        else:
+            word = "gain" if up else "decline"
+            line = f"Largest {word} in {history.days_since_larger_move} days."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="days_since_larger_7")
+        return line
     if history.is_largest_ytd and history.ytd_move_count >= 5:
-        return "Largest move of the year."
+        line = "Largest move of the year."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="largest_ytd_5")
+        return line
     if history.is_largest_ytd and history.ytd_move_count >= 2:
-        return "Largest move tracked this year."
+        line = "Largest move tracked this year."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="largest_ytd_2")
+        return line
     if history.liquidation_rank:
+        if decision is not None:
+            decision.select("sqlite_rarity", history.liquidation_rank, sqlite_branch="liquidation_rank")
         return history.liquidation_rank
     if alert.alert_tier == "emergency":
-        return "Largest move vs recent baseline."
+        line = "Largest move vs recent baseline."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="emergency_baseline")
+        return line
     return _context_fallback(alert, history)
 
 
 def _macro_context_fallback(alert: AlertTrigger, history: MoveHistory) -> str:
+    decision = _context_decision()
     if alert.indicator == "fed_funds":
+        if decision is not None:
+            decision.note_candidate("market_memory")
         memory_line = _memory_context_line(alert)
         if memory_line:
+            if decision is not None:
+                decision.select("market_memory", memory_line)
             return memory_line
 
     up = _direction_up(alert)
@@ -1178,36 +1293,65 @@ def _macro_context_fallback(alert: AlertTrigger, history: MoveHistory) -> str:
         ),
     }
     if ind in paired:
-        return paired[ind][0 if up else 1]
+        line = paired[ind][0 if up else 1]
+        if decision is not None:
+            decision.select("template_fallback", line, sqlite_branch="macro_paired")
+        return line
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
         word = "increase" if up else "decline"
-        return f"Largest macro {word} in {history.days_since_larger_move} days."
-    return "Macro release stands out vs recent readings."
+        line = f"Largest macro {word} in {history.days_since_larger_move} days."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="macro_days_since_larger")
+        return line
+    line = "Macro release stands out vs recent readings."
+    if decision is not None:
+        decision.select("template_fallback", line, sqlite_branch="macro_generic")
+    return line
 
 
 def _context_fallback(alert: AlertTrigger, history: MoveHistory) -> str | None:
+    decision = _context_decision()
     ind = alert.indicator
     if ind in PRICE_INDICATORS:
         pct = abs(history.pct_change or alert.magnitude_pct)
         if pct >= 3:
-            return "Sharp move vs recent sessions."
-        return "Notable move vs recent trading range."
+            line = "Sharp move vs recent sessions."
+        else:
+            line = "Notable move vs recent trading range."
+        if decision is not None:
+            decision.select("template_fallback", line, sqlite_branch="price_fallback")
+        return line
     if ind in RATES_VOL_INDICATORS:
         if history.days_since_larger_move and history.days_since_larger_move >= 7:
-            return f"Largest rate/vol move in {history.days_since_larger_move} days."
-        return "Rate and volatility conditions shifting."
+            line = f"Largest rate/vol move in {history.days_since_larger_move} days."
+            if decision is not None:
+                decision.select("sqlite_rarity", line, sqlite_branch="rates_days_since_larger")
+            return line
+        line = "Rate and volatility conditions shifting."
+        if decision is not None:
+            decision.select("template_fallback", line, sqlite_branch="rates_fallback")
+        return line
     if ind in MACRO_INDICATORS or alert.is_macro:
         return _macro_context_fallback(alert, history)
     if ind in HOUSING_INDICATORS:
         if history.days_since_larger_move and history.days_since_larger_move >= 7:
             word = "gain" if _direction_up(alert) else "decline"
-            return f"Largest housing {word} in {history.days_since_larger_move} days."
-        return "Housing market repricing."
+            line = f"Largest housing {word} in {history.days_since_larger_move} days."
+            if decision is not None:
+                decision.select("sqlite_rarity", line, sqlite_branch="housing_days_since_larger")
+            return line
+        line = "Housing market repricing."
+        if decision is not None:
+            decision.select("template_fallback", line, sqlite_branch="housing_fallback")
+        return line
     if ind.endswith(("_basis", "_funding", "_exchange_spread", "_open_interest", "_liquidations")):
         return _crypto_context_line(alert, history)
     if ind == "fear_greed":
         return _sentiment_context(alert, history)
-    return "Move stands out vs recent baseline."
+    line = "Move stands out vs recent baseline."
+    if decision is not None:
+        decision.select("template_fallback", line, sqlite_branch="generic_fallback")
+    return line
 
 
 def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None) -> str:
@@ -1337,6 +1481,9 @@ def _is_key_level_cross(alert: AlertTrigger) -> bool:
 
 def _cross_context_line(alert: AlertTrigger, history: MoveHistory | None = None) -> str | None:
     history = history or MoveHistory()
+    decision = _context_decision()
+    if decision is not None:
+        decision.note_candidate("sqlite_rarity")
     direction = _cross_direction(alert)
     if not direction:
         return None
@@ -1350,7 +1497,12 @@ def _cross_context_line(alert: AlertTrigger, history: MoveHistory | None = None)
         else:
             base = "Key level break."
     if history.days_since_larger_move and history.days_since_larger_move >= 7:
-        return f"{base.rstrip('.')} — largest move in {history.days_since_larger_move} days."
+        line = f"{base.rstrip('.')} — largest move in {history.days_since_larger_move} days."
+        if decision is not None:
+            decision.select("sqlite_rarity", line, sqlite_branch="cross_days_since_larger")
+        return line
+    if decision is not None:
+        decision.select("sqlite_rarity", base, sqlite_branch="cross_level")
     return base
 
 
@@ -1676,6 +1828,30 @@ def _pick_single_template(
     return _template_major_move(alert, history, posting_cfg, is_emergency=is_emergency)
 
 
+def explain_context_selection(
+    alert: AlertTrigger,
+    history: MoveHistory | None = None,
+    *,
+    app_cfg: dict[str, Any] | None = None,
+) -> ContextDecision:
+    """Resolve the context line using the same path as compose (for tests/debug)."""
+    global _ACTIVE_CONTEXT_DECISION
+    history = history or MoveHistory()
+    _set_compose_cfg(app_cfg)
+    decision = ContextDecision.for_alert(alert)
+    _ACTIVE_CONTEXT_DECISION = decision
+    try:
+        if alert.indicator.endswith(("_liquidations", "_funding", "_basis", "_open_interest", "_exchange_spread")):
+            _crypto_context_line(alert, history)
+        elif alert.indicator == "fear_greed":
+            _sentiment_context(alert, history)
+        else:
+            _context_line(alert, history)
+    finally:
+        _ACTIVE_CONTEXT_DECISION = None
+    return decision
+
+
 def compose_single_tweet(
     alert: AlertTrigger,
     *,
@@ -1684,10 +1860,20 @@ def compose_single_tweet(
     is_emergency: bool = False,
     app_cfg: dict[str, Any] | None = None,
 ) -> str:
+    global _ACTIVE_CONTEXT_DECISION
     history = history or MoveHistory()
     posting_cfg = posting_cfg or {}
     _set_compose_cfg(app_cfg)
-    return _pick_single_template(alert, history, posting_cfg, is_emergency=is_emergency)
+    explain = explain_context_enabled(posting_cfg, app_cfg)
+    decision = ContextDecision.for_alert(alert) if explain else None
+    _ACTIVE_CONTEXT_DECISION = decision
+    try:
+        text = _pick_single_template(alert, history, posting_cfg, is_emergency=is_emergency)
+    finally:
+        _ACTIVE_CONTEXT_DECISION = None
+    if explain:
+        log_context_decision(decision)
+    return text
 
 
 CHART_ALWAYS_SUFFIXES = ("_liquidations", "_basis", "_exchange_spread", "_funding", "_open_interest")
@@ -1750,6 +1936,7 @@ def compose_multi_tweet(
     is_emergency: bool = False,
     app_cfg: dict[str, Any] | None = None,
 ) -> str:
+    global _ACTIVE_CONTEXT_DECISION
     histories = histories or {}
     posting_cfg = posting_cfg or {}
     _set_compose_cfg(app_cfg)
@@ -1763,6 +1950,7 @@ def compose_multi_tweet(
             app_cfg=app_cfg,
         )
 
+    explain = explain_context_enabled(posting_cfg, app_cfg)
     theme = theme or (alerts[0].themes[0] if alerts[0].themes else "markets")
     top = max(alerts, key=lambda x: x.score)
     top_hist = histories.get(top.indicator, MoveHistory())
@@ -1772,34 +1960,58 @@ def compose_multi_tweet(
     for a in sorted(alerts, key=lambda x: x.score, reverse=True)[:4]:
         data_lines.extend(_multi_data_lines_for_alert(a, histories.get(a.indicator, MoveHistory())))
 
-    if _is_key_level_cross(top):
-        cross = _cross_sections(top, top_hist, posting_cfg, is_emergency=is_emergency, emoji=emoji)
-        return _assemble_tweet(headline=cross["headline"], data_lines=data_lines, context=cross["context"], takeaway=cross["takeaway"])
-
-    implications = {
-        "risk_on": "Largest coordinated risk-on move in weeks.",
-        "risk_off": "Largest coordinated risk-off move in weeks.",
-        "crypto": "Largest coordinated crypto move in weeks.",
-        "inflation_pressure": "Inflation signals stacking across releases.",
-        "easing_conditions": "Easing signals stacking across releases.",
-        "tightening_conditions": "Tightening signals stacking across releases.",
-        "housing": "Housing indicators diverging sharply.",
-    }
-    multi_takeaways = {
-        "risk_on": "improving risk appetite across the cluster",
-        "risk_off": "defensive demand rising across the cluster",
-        "crypto": "crypto positioning shifting across spot and perps",
-        "inflation_pressure": "inflation pressure narrative heating up across the cluster",
-        "easing_conditions": "financial conditions easing across the cluster",
-        "tightening_conditions": "liquidity tightening across the cluster",
-        "housing": "housing market repricing across the cluster",
-    }
-    theme_headline = THEME_HEADLINES.get(theme, "Multi-asset move").upper()
-    headline = f"{emoji}{theme_headline}".strip()
-    context = implications.get(theme) or _context_line(top, top_hist) or "Cluster stands out vs recent baseline."
-    return _assemble_tweet(
-        headline=headline,
-        data_lines=data_lines,
-        context=context,
-        takeaway=multi_takeaways.get(theme, "market structure shifting together across assets"),
-    )
+    decision = ContextDecision.for_alert(top) if explain else None
+    _ACTIVE_CONTEXT_DECISION = decision
+    try:
+        if _is_key_level_cross(top):
+            cross = _cross_sections(top, top_hist, posting_cfg, is_emergency=is_emergency, emoji=emoji)
+            text = _assemble_tweet(
+                headline=cross["headline"],
+                data_lines=data_lines,
+                context=cross["context"],
+                takeaway=cross["takeaway"],
+            )
+        else:
+            implications = {
+                "risk_on": "Largest coordinated risk-on move in weeks.",
+                "risk_off": "Largest coordinated risk-off move in weeks.",
+                "crypto": "Largest coordinated crypto move in weeks.",
+                "inflation_pressure": "Inflation signals stacking across releases.",
+                "easing_conditions": "Easing signals stacking across releases.",
+                "tightening_conditions": "Tightening signals stacking across releases.",
+                "housing": "Housing indicators diverging sharply.",
+            }
+            multi_takeaways = {
+                "risk_on": "improving risk appetite across the cluster",
+                "risk_off": "defensive demand rising across the cluster",
+                "crypto": "crypto positioning shifting across spot and perps",
+                "inflation_pressure": "inflation pressure narrative heating up across the cluster",
+                "easing_conditions": "financial conditions easing across the cluster",
+                "tightening_conditions": "liquidity tightening across the cluster",
+                "housing": "housing market repricing across the cluster",
+            }
+            theme_headline = THEME_HEADLINES.get(theme, "Multi-asset move").upper()
+            headline = f"{emoji}{theme_headline}".strip()
+            if decision is not None:
+                decision.note_candidate("template_fallback")
+                decision.note_candidate("sqlite_rarity")
+            theme_context = implications.get(theme)
+            if theme_context:
+                context = theme_context
+                if decision is not None:
+                    decision.select("template_fallback", context, sqlite_branch="multi_theme")
+            else:
+                context = _context_line(top, top_hist) or "Cluster stands out vs recent baseline."
+                if decision is not None and decision.selected_source == "none":
+                    decision.select("template_fallback", context, sqlite_branch="multi_cluster_fallback")
+            text = _assemble_tweet(
+                headline=headline,
+                data_lines=data_lines,
+                context=context,
+                takeaway=multi_takeaways.get(theme, "market structure shifting together across assets"),
+            )
+    finally:
+        _ACTIVE_CONTEXT_DECISION = None
+    if explain:
+        log_context_decision(decision)
+    return text
