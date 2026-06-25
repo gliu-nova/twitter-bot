@@ -439,6 +439,7 @@ def process_posting_queue(
                 histories=histories,
                 posting_cfg=posting_cfg,
                 is_emergency=decision.is_emergency,
+                app_cfg=cfg,
             )
         else:
             alert = decision.alerts[0]
@@ -448,6 +449,7 @@ def process_posting_queue(
                 history=history,
                 posting_cfg=posting_cfg,
                 is_emergency=decision.is_emergency,
+                app_cfg=cfg,
             )
 
         chart_path = chart_for_decision(
@@ -505,6 +507,12 @@ def process_posting_queue(
         )
         for a in decision.alerts:
             record_alert(conn, a.indicator, a.value)
+            try:
+                from src.market_memory_bridge import record_posted_alert
+
+                record_posted_alert(a, cfg)
+            except Exception as exc:
+                print(f"[posting] market-memory record skipped: {exc}")
 
         # Mark entire batch processed (including unselected alerts from same window)
         mark_alerts_processed(conn, [a.db_id for a in raw_alerts if a.db_id])

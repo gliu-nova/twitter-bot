@@ -192,6 +192,18 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     if posted:
         print(f"Posted {posted} tweet(s)")
 
+    try:
+        from src.market_memory_bridge import maybe_sync_market_memory
+
+        sync_report = maybe_sync_market_memory(cfg)
+        if sync_report and not sync_report.get("skipped"):
+            print(
+                f"[market-memory] sync ingested {sync_report.get('ingested', 0)} event(s) "
+                f"({sync_report.get('sources', {}).get('liquidations_mode', 'n/a')})"
+            )
+    except Exception as exc:
+        print(f"[market-memory] sync error: {exc}", file=sys.stderr)
+
     conn.close()
     if skipped_alerts:
         print(f"Alerts suppressed: {skipped_alerts}")

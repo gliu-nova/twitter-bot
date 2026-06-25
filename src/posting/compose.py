@@ -20,6 +20,13 @@ from typing import Any
 from src.posting.history import MoveHistory
 from src.posting.models import AlertTrigger
 
+_COMPOSE_CFG: dict[str, Any] | None = None
+
+
+def _set_compose_cfg(cfg: dict[str, Any] | None) -> None:
+    global _COMPOSE_CFG
+    _COMPOSE_CFG = cfg
+
 JARGON_TERMS = (
     "cross-exchange arb gap",
     "venue pricing",
@@ -573,10 +580,24 @@ def _has_crypto_rarity(alert: AlertTrigger, history: MoveHistory) -> bool:
     return _crypto_rarity_line(alert, history) is not None
 
 
+def _memory_context_line(alert: AlertTrigger) -> str | None:
+    if _COMPOSE_CFG is None:
+        return None
+    try:
+        from src.market_memory_bridge import memory_context_line
+
+        return memory_context_line(alert, _COMPOSE_CFG)
+    except Exception:
+        return None
+
+
 def _crypto_context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
     rarity = _crypto_rarity_line(alert, history)
     if rarity:
         return rarity
+    memory_line = _memory_context_line(alert)
+    if memory_line:
+        return memory_line
     return _crypto_why_line(alert, history)
 
 
@@ -1656,9 +1677,11 @@ def compose_single_tweet(
     history: MoveHistory | None = None,
     posting_cfg: dict[str, Any] | None = None,
     is_emergency: bool = False,
+    app_cfg: dict[str, Any] | None = None,
 ) -> str:
     history = history or MoveHistory()
     posting_cfg = posting_cfg or {}
+    _set_compose_cfg(app_cfg)
     return _pick_single_template(alert, history, posting_cfg, is_emergency=is_emergency)
 
 
@@ -1720,9 +1743,11 @@ def compose_multi_tweet(
     histories: dict[str, MoveHistory] | None = None,
     posting_cfg: dict[str, Any] | None = None,
     is_emergency: bool = False,
+    app_cfg: dict[str, Any] | None = None,
 ) -> str:
     histories = histories or {}
     posting_cfg = posting_cfg or {}
+    _set_compose_cfg(app_cfg)
     if len(alerts) == 1:
         a = alerts[0]
         return compose_single_tweet(
@@ -1730,6 +1755,7 @@ def compose_multi_tweet(
             history=histories.get(a.indicator, MoveHistory()),
             posting_cfg=posting_cfg,
             is_emergency=is_emergency,
+            app_cfg=app_cfg,
         )
 
     theme = theme or (alerts[0].themes[0] if alerts[0].themes else "markets")

@@ -4,3 +4,4 @@ python-dotenv>=1.0.0
 PyYAML>=6.0.0
 tweepy>=4.14.0
 matplotlib>=3.8.0
+-e ../market-memory
