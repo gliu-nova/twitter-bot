@@ -44,7 +44,7 @@ INDICATOR_MEMORY_MAP: dict[str, dict[str, Any]] = {
 
 def _resolve_data_dir(cfg: dict[str, Any]) -> Path:
     mm_cfg = cfg.get("market_memory") or {}
-    raw = mm_cfg.get("data_dir") or os.environ.get("MARKET_MEMORY_DATA_DIR")
+    raw = os.environ.get("MARKET_MEMORY_DATA_DIR") or mm_cfg.get("data_dir")
     if raw:
         path = Path(raw)
         if not path.is_absolute():

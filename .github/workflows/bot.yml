@@ -25,6 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    env:
+      # CI has no sibling ../market-memory checkout; store DuckDB under cached data/.
+      MARKET_MEMORY_DATA_DIR: data/market_memory
+      # Secret name in repo settings must match (COINALYZE_API_KEY or coinalyze_api_key).
+      COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY || secrets.coinalyze_api_key }}
+
     steps:
       - name: Log trigger
         run: |
@@ -55,7 +61,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Validate secrets and APIs
         env:
