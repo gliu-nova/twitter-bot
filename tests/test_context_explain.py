@@ -10,6 +10,7 @@ from src.market_memory_bridge import MemoryContextResult
 from src.posting.compose import compose_single_tweet, explain_context_selection
 from src.posting.context_explain import (
     SkippedPostCandidate,
+    classify_post_skip,
     explain_context_enabled,
     explain_skipped_top_n,
     finalize_context_explain_logs,
@@ -150,6 +151,16 @@ class SkippedExplainTests(unittest.TestCase):
         with patch.dict("os.environ", {"EXPLAIN_SKIPPED_TOP_N": "2"}):
             self.assertEqual(explain_skipped_top_n(app_cfg={"posting": {"explain_skipped_top_n": 3}}), 2)
 
+    def test_classify_post_skip_below_threshold_with_cooldown(self) -> None:
+        primary, secondary = classify_post_skip(gate="cooldown", score=70, post_threshold=85)
+        self.assertEqual(primary, "below_threshold")
+        self.assertEqual(secondary, "cooldown")
+
+    def test_classify_post_skip_cooldown_only(self) -> None:
+        primary, secondary = classify_post_skip(gate="cooldown", score=90, post_threshold=85)
+        self.assertEqual(primary, "cooldown")
+        self.assertIsNone(secondary)
+
     def test_select_top_skipped_candidates_respects_limit_and_dedupes(self) -> None:
         candidates = [
             SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", 90),
@@ -166,7 +177,7 @@ class SkippedExplainTests(unittest.TestCase):
         finalize_context_explain_logs(
             posted=1,
             skipped_candidates=[
-                SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", 90),
+                SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", score=90),
             ],
             conn=unittest.mock.MagicMock(),
             cfg=self.cfg,
@@ -187,8 +198,8 @@ class SkippedExplainTests(unittest.TestCase):
             app_cfg=self.cfg,
         )
         candidates = [
-            SkippedPostCandidate(_alert("eth", 1, score=70), "cooldown", 70),
-            SkippedPostCandidate(_alert("btc_funding", 0.0001, score=90), "daily_cap", 90),
+            SkippedPostCandidate(_alert("eth", 1, score=70), "cooldown", score=70),
+            SkippedPostCandidate(_alert("btc_funding", 0.0001, score=90), "daily_cap", score=90),
         ]
         with patch("builtins.print") as mock_print:
             finalize_context_explain_logs(
@@ -203,7 +214,7 @@ class SkippedExplainTests(unittest.TestCase):
         ]
         self.assertEqual(len(skipped_lines), 1)
         self.assertIn("btc_funding", skipped_lines[0])
-        self.assertIn("daily_cap", skipped_lines[0])
+        self.assertIn('"primary_skip_reason":"daily_cap"', skipped_lines[0])
         mock_explain.assert_called_once()
 
     @patch("src.posting.compose.explain_context_selection")
@@ -219,9 +230,9 @@ class SkippedExplainTests(unittest.TestCase):
         )
         cfg = {**self.cfg, "posting": {**self.cfg["posting"], "explain_skipped_top_n": 2}}
         candidates = [
-            SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", 90),
-            SkippedPostCandidate(_alert("eth", 2, score=80), "cooldown", 80),
-            SkippedPostCandidate(_alert("sol", 3, score=70), "buffered", 70),
+            SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", score=90),
+            SkippedPostCandidate(_alert("eth", 2, score=80), "cooldown", score=80),
+            SkippedPostCandidate(_alert("sol", 3, score=70), "buffered", score=70),
         ]
         with patch("builtins.print") as mock_print:
             finalize_context_explain_logs(
@@ -249,7 +260,7 @@ class SkippedExplainTests(unittest.TestCase):
             finalize_context_explain_logs(
                 posted=0,
                 skipped_candidates=[
-                    SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", 90),
+                    SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", score=90),
                 ],
                 conn=unittest.mock.MagicMock(),
                 cfg=cfg,
@@ -273,7 +284,7 @@ class SkippedExplainTests(unittest.TestCase):
             finalize_context_explain_logs(
                 posted=0,
                 skipped_candidates=[
-                    SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", 90),
+                    SkippedPostCandidate(_alert("btc", 1, score=90), "daily_cap", score=90),
                 ],
                 conn=unittest.mock.MagicMock(),
                 cfg=cfg,

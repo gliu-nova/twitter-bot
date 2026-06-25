@@ -34,6 +34,7 @@ from src.posting.compose import (
 )
 from src.posting.context_explain import (
     SkippedPostCandidate,
+    classify_post_skip,
     finalize_context_explain_logs,
 )
 from src.posting.history import build_move_history
@@ -426,14 +427,22 @@ def process_posting_queue(
             batch = _buffer_batch_for_alert(
                 top, session_market, anytime_market, macro_alerts,
             )
+            post_threshold = float(posting_cfg.get("high_single_threshold", 85))
+            primary, secondary = classify_post_skip(
+                gate="buffered",
+                score=top.score,
+                post_threshold=post_threshold,
+            )
             skipped_candidates.append(
                 SkippedPostCandidate(
                     alert=top,
-                    skip_reason=_buffer_wait_reason(
+                    primary_skip_reason=primary,
+                    secondary_skip_reason=secondary,
+                    skip_detail=_buffer_wait_reason(
                         top, batch, posting_cfg, now_utc=now_utc, now_et=now_et,
                     ),
                     score=top.score,
-                    post_threshold=float(posting_cfg.get("high_single_threshold", 85)),
+                    post_threshold=post_threshold,
                 ),
             )
         finalize_context_explain_logs(
@@ -450,12 +459,20 @@ def process_posting_queue(
         if not alerts:
             if raw_alerts:
                 top = max(raw_alerts, key=lambda alert: alert.score)
+                post_threshold = float(posting_cfg.get("high_single_threshold", 85))
+                primary, secondary = classify_post_skip(
+                    gate="stale",
+                    score=top.score,
+                    post_threshold=post_threshold,
+                )
                 skipped_candidates.append(
                     SkippedPostCandidate(
                         alert=top,
-                        skip_reason="stale:all_alerts_expired",
+                        primary_skip_reason=primary,
+                        secondary_skip_reason=secondary,
+                        skip_detail="all_alerts_expired",
                         score=top.score,
-                        post_threshold=float(posting_cfg.get("high_single_threshold", 85)),
+                        post_threshold=post_threshold,
                     ),
                 )
             mark_alerts_processed(conn, [a.db_id for a in raw_alerts if a.db_id])
@@ -484,12 +501,20 @@ def process_posting_queue(
         ]
         if not filtered:
             print("[posting] all alerts in cooldown — skipping (keeping in queue)")
+            post_threshold = _post_threshold_for_decision(decision, posting_cfg)
+            primary, secondary = classify_post_skip(
+                gate="cooldown",
+                score=decision.score,
+                post_threshold=post_threshold,
+            )
             skipped_candidates.append(
                 SkippedPostCandidate(
                     alert=_primary_decision_alert(decision),
-                    skip_reason="cooldown:all_alerts_in_cooldown",
+                    primary_skip_reason=primary,
+                    secondary_skip_reason=secondary,
+                    skip_detail="all_alerts_in_cooldown",
                     score=decision.score,
-                    post_threshold=_post_threshold_for_decision(decision, posting_cfg),
+                    post_threshold=post_threshold,
                 ),
             )
             continue
@@ -498,12 +523,19 @@ def process_posting_queue(
         # Daily cap (emergency bypasses)
         if not decision.is_emergency and _daily_cap_reached(conn, posting_cfg):
             print(f"[posting] daily cap ({posting_cfg.get('daily_post_cap', 8)}) reached — skipping")
+            post_threshold = _post_threshold_for_decision(decision, posting_cfg)
+            primary, secondary = classify_post_skip(
+                gate="daily_cap",
+                score=decision.score,
+                post_threshold=post_threshold,
+            )
             skipped_candidates.append(
                 SkippedPostCandidate(
                     alert=_primary_decision_alert(decision),
-                    skip_reason="daily_cap_reached",
+                    primary_skip_reason=primary,
+                    secondary_skip_reason=secondary,
                     score=decision.score,
-                    post_threshold=_post_threshold_for_decision(decision, posting_cfg),
+                    post_threshold=post_threshold,
                 ),
             )
             continue

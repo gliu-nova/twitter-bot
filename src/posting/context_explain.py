@@ -12,6 +12,9 @@ from src.posting.models import AlertTrigger
 
 ContextSource = Literal["sqlite_rarity", "market_memory", "template_fallback", "none"]
 ExplainOutcome = Literal["posted", "skipped"]
+PostSkipGate = Literal["buffered", "stale", "cooldown", "daily_cap"]
+PrimarySkipReason = Literal["below_threshold", "buffered", "stale", "cooldown", "daily_cap"]
+SecondarySkipReason = Literal["below_threshold", "cooldown", "daily_cap", "stale", "buffered"]
 
 
 @dataclass
@@ -90,12 +93,38 @@ class ContextDecision:
         return json.dumps(self.to_log_dict(outcome=outcome), separators=(",", ":"), ensure_ascii=True)
 
 
+def classify_post_skip(
+    *,
+    gate: PostSkipGate,
+    score: float,
+    post_threshold: float | None,
+) -> tuple[PrimarySkipReason, SecondarySkipReason | None]:
+    """Map posting-engine gate + score to primary/secondary skip reasons."""
+    below_threshold = post_threshold is not None and score < post_threshold
+
+    if gate == "buffered":
+        return "buffered", "below_threshold" if below_threshold else None
+    if gate == "stale":
+        return "stale", "below_threshold" if below_threshold else None
+    if gate == "cooldown":
+        if below_threshold:
+            return "below_threshold", "cooldown"
+        return "cooldown", None
+    if gate == "daily_cap":
+        if below_threshold:
+            return "below_threshold", "daily_cap"
+        return "daily_cap", None
+    raise ValueError(f"unknown post skip gate: {gate}")
+
+
 @dataclass
 class SkippedPostCandidate:
     alert: AlertTrigger
-    skip_reason: str
+    primary_skip_reason: PrimarySkipReason
     score: float
     post_threshold: float | None = None
+    secondary_skip_reason: SecondarySkipReason | None = None
+    skip_detail: str | None = None
 
 
 # Alias for callers that prefer the explain naming.
@@ -175,7 +204,11 @@ def log_skipped_context_explanations(
         context = explain_context_selection(candidate.alert, history, app_cfg=cfg)
         payload = context.to_log_dict(outcome="skipped")
         payload["score"] = candidate.score
-        payload["skip_reason"] = candidate.skip_reason
+        payload["primary_skip_reason"] = candidate.primary_skip_reason
+        if candidate.secondary_skip_reason is not None:
+            payload["secondary_skip_reason"] = candidate.secondary_skip_reason
+        if candidate.skip_detail is not None:
+            payload["skip_detail"] = candidate.skip_detail
         if candidate.post_threshold is not None:
             payload["post_threshold"] = candidate.post_threshold
         print(
