@@ -16,8 +16,8 @@ market_memory:
   data_dir: data/market_memory
   since: "2021-01-01"
   min_occurrences: 3
-  sync_on_poll: true          # incremental sync each bot tick (respects sync_interval_minutes)
-  sync_interval_minutes: 60   # funding/basis/liq OKX buckets; no Coinglass required
+  sync_on_poll: true          # incremental sync each bot run
+  sync_interval_minutes: 0    # 0 = sync every run (hourly GitHub Actions)
   seed_verified_liquidations: false  # set true once if DB has no historical liquidation episodes
 
 # Posting engine — scoring, grouping, daily cap, buffers.
