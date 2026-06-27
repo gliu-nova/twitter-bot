@@ -136,8 +136,11 @@ def _yahoo_latest(symbol: str) -> tuple[float, str]:
     hist = ticker.history(period="5d")
     if hist.empty:
         raise FetchError(f"No Yahoo data for {symbol}")
-    row = hist.iloc[-1]
-    observed = hist.index[-1].strftime("%Y-%m-%d")
+    valid = hist.dropna(subset=["Close"])
+    if valid.empty:
+        raise FetchError(f"No valid Yahoo close for {symbol}")
+    row = valid.iloc[-1]
+    observed = valid.index[-1].strftime("%Y-%m-%d")
     return float(row["Close"]), observed
 
 
