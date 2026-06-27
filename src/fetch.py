@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -283,6 +283,23 @@ def fetch_chart_history(settings: dict[str, Any], *, months: int = 6) -> list[tu
             out.append((day, float(e["value"])))
         return out
 
+    if source in ("finra_dark_pool_volume", "finra_dark_pool_pct", "finra_dark_pool"):
+        from src.finra_dark_pool import fetch_finra_dark_pool_both_history
+
+        since = datetime.now(timezone.utc) - timedelta(days=max(30, months * 31))
+        volume_rows, _pct_rows = fetch_finra_dark_pool_both_history(
+            settings.get("symbol", "SPY"),
+            since=since,
+        )
+        return volume_rows
+
+    if source == "etf_activity":
+        ticker = yf.Ticker(settings["symbol"])
+        hist = ticker.history(period=period)
+        if hist.empty:
+            return []
+        return [(idx.strftime("%Y-%m-%d"), float(row["Volume"])) for idx, row in hist.iterrows()]
+
     return []
 
 
@@ -313,4 +330,22 @@ def fetch_indicator(settings: dict[str, Any]) -> tuple[float, str]:
         from src.crypto_metrics import fetch_crypto_metric
 
         return fetch_crypto_metric(settings)
+    if source == "finra_dark_pool":
+        from src.finra_dark_pool import fetch_finra_dark_pool_both
+
+        volume, _pct, observed = fetch_finra_dark_pool_both(settings.get("symbol", "SPY"))
+        return volume, observed
+    if source == "finra_dark_pool_volume":
+        from src.finra_dark_pool import fetch_finra_dark_pool_latest
+
+        return fetch_finra_dark_pool_latest(settings.get("symbol", "SPY"), volume=True)
+    if source == "finra_dark_pool_pct":
+        from src.finra_dark_pool import fetch_finra_dark_pool_latest
+
+        return fetch_finra_dark_pool_latest(settings.get("symbol", "SPY"), volume=False)
+    if source == "etf_activity":
+        from src.etf_activity import fetch_etf_activity
+
+        snap = fetch_etf_activity(settings["symbol"])
+        return snap.volume, snap.observed_at
     raise FetchError(f"Unknown source: {source}")

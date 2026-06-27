@@ -63,7 +63,7 @@ def connect() -> sqlite3.Connection:
         )
         conn.commit()
     reading_cols = {row[1] for row in conn.execute("PRAGMA table_info(readings)")}
-    for col in ("liq_long_usd", "liq_short_usd"):
+    for col in ("liq_long_usd", "liq_short_usd", "aux_value"):
         if col not in reading_cols:
             conn.execute(f"ALTER TABLE readings ADD COLUMN {col} REAL")
     conn.commit()
@@ -100,13 +100,14 @@ def save_reading(
     *,
     liq_long_usd: float | None = None,
     liq_short_usd: float | None = None,
+    aux_value: float | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT INTO readings
-           (indicator, value, observed_at, recorded_at, liq_long_usd, liq_short_usd)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (indicator, value, observed_at, now, liq_long_usd, liq_short_usd),
+           (indicator, value, observed_at, recorded_at, liq_long_usd, liq_short_usd, aux_value)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (indicator, value, observed_at, now, liq_long_usd, liq_short_usd, aux_value),
     )
     conn.commit()
 

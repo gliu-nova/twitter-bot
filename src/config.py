@@ -17,6 +17,9 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
 def _normalize_rules(ind: dict[str, Any]) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = list(ind.get("rules") or [])
 
+    if ind.get("alert_mode") == "custom":
+        return rules
+
     if ind.get("normal_alert") is not None:
         unit = ind.get("alert_unit", "percent")
         rtype = "absolute_change" if unit == "absolute" else "percent_change"
@@ -50,6 +53,10 @@ def _source_quality_defaults(source: str) -> dict[str, Any]:
     ):
         return {"schedule": "crypto_24_7", "max_stale_hours": 2}
     if source == "yahoo":
+        return {"schedule": "us_equity", "max_stale_hours": 48}
+    if source in ("finra_dark_pool_volume", "finra_dark_pool_pct", "finra_dark_pool"):
+        return {"schedule": "us_equity", "max_stale_hours": 120}
+    if source == "etf_activity":
         return {"schedule": "us_equity", "max_stale_hours": 48}
     return {"schedule": "macro", "max_stale_hours": 4320}
 

@@ -143,6 +143,42 @@ posting:
       category: equities_vol
       rarity: 75
       audience_relevance: 85
+    qqq:
+      themes: [risk_on, equities]
+      category: equities_vol
+      rarity: 74
+      audience_relevance: 84
+    bond_etf_agg:
+      themes: [risk_off, easing_conditions]
+      category: rates_fx
+      rarity: 55
+      audience_relevance: 60
+    bond_etf_bnd:
+      themes: [risk_off, easing_conditions]
+      category: rates_fx
+      rarity: 50
+      audience_relevance: 55
+    crypto_etf_ibit:
+      themes: [risk_on, crypto]
+      category: crypto
+      rarity: 72
+      audience_relevance: 80
+    crypto_etf_fbtc:
+      themes: [risk_on, crypto]
+      category: crypto
+      rarity: 70
+      audience_relevance: 78
+    dark_pool_spy:
+      themes: [equities, risk_off]
+      category: equities_vol
+      rarity: 72
+      audience_relevance: 68
+    treasury_2y:
+      themes: [tightening_conditions]
+      category: rates_fx
+      rarity: 78
+      audience_relevance: 82
+      standalone_major: true
     vix:
       themes: [risk_off]
       category: equities_vol
@@ -285,6 +321,78 @@ indicators:
     major_alert: 4
     emergency_alert: 6
 
+  qqq:
+    name: "QQQ ETF"
+    source: yahoo
+    symbol: "QQQ"
+    alert_mode: custom
+    cooldown_hours: 12
+    normal_alert: 2.5
+    major_alert: 3.5
+    emergency_alert: 5.5
+    move_percentile: 97
+    move_percentile_min_days: 60
+
+  bond_etf_agg:
+    name: "iShares Aggregate Bond ETF"
+    source: yahoo
+    symbol: "AGG"
+    cooldown_hours: 24
+    normal_alert: 0.5
+    major_alert: 0.8
+    emergency_alert: 1.2
+
+  bond_etf_bnd:
+    name: "Vanguard Total Bond ETF"
+    source: yahoo
+    symbol: "BND"
+    cooldown_hours: 24
+    normal_alert: 0.5
+    major_alert: 0.8
+    emergency_alert: 1.2
+
+  crypto_etf_ibit:
+    name: "iShares Bitcoin ETF"
+    source: etf_activity
+    symbol: "IBIT"
+    alert_mode: custom
+    cooldown_hours: 12
+    normal_alert: 1.5
+    major_alert: 2.0
+    emergency_alert: 2.5
+    volume_percentile: 95
+    flow_usd_floor: 75000000
+    options_volume_floor: 150000
+    options_pcr_high: 2.5
+    options_pcr_low: 0.5
+
+  crypto_etf_fbtc:
+    name: "Fidelity Bitcoin ETF"
+    source: yahoo
+    symbol: "FBTC"
+    cooldown_hours: 12
+    normal_alert: 5
+    major_alert: 8
+    emergency_alert: 12
+
+  dark_pool_spy:
+    name: "Dark Pool Activity (SPY)"
+    source: finra_dark_pool
+    symbol: SPY
+    alert_mode: custom
+    cooldown_hours: 24
+    alert_unit: absolute
+    normal_alert: 12
+    major_alert: 20
+    emergency_alert: 30
+    pct_percentile: 97
+    pct_high_lookback_days: 180
+    volume_avg_30d_mult: 1.35
+    volume_avg_60d_mult: 1.50
+    volume_avg_90d_mult: 1.65
+    quality:
+      max_stale_hours: 120
+
   vix:
     name: "VIX"
     source: yahoo
@@ -331,8 +439,8 @@ indicators:
     major_alert: 8
     emergency_alert: 12
 
-  move:
-    name: "MOVE Index"
+  move:  # MOVE Index — bond market volatility (not 10Y yield movement)
+    name: "MOVE Index (Bond Volatility)"
     source: yahoo
     symbol: "^MOVE"
     normal_alert: 8
@@ -652,6 +760,20 @@ indicators:
         value: 5.0
       - type: crosses_below
         value: 4.0
+
+  treasury_2y:
+    name: "2Y Treasury Yield"
+    source: fred
+    series: DGS2
+    alert_unit: absolute
+    normal_alert: 0.08
+    major_alert: 0.12
+    emergency_alert: 0.20
+    rules:
+      - type: crosses_above
+        value: 4.0
+      - type: crosses_below
+        value: 3.5
 
   yield_curve:
     name: "Yield Curve (10Y - 2Y)"

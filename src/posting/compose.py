@@ -93,15 +93,22 @@ MACRO_INDICATORS = {
 }
 
 PRICE_INDICATORS = frozenset({
-    "btc", "eth", "sol", "gold", "silver", "oil", "sp500", "nasdaq100",
+    "btc", "eth", "sol", "gold", "silver", "oil",
+    "sp500", "nasdaq100", "qqq",
+    "bond_etf_agg", "bond_etf_bnd",
+    "crypto_etf_fbtc",
 })
+ETF_ACTIVITY_INDICATORS = frozenset({"crypto_etf_ibit"})
 RATES_VOL_INDICATORS = frozenset({
-    "vix", "move", "hy_spread", "treasury_10y", "fed_funds", "yield_curve", "dxy",
+    "vix", "move", "hy_spread",
+    "treasury_10y", "treasury_2y", "fed_funds", "yield_curve", "dxy",
+    "dark_pool_spy",
 })
 HOUSING_INDICATORS = frozenset({"case_shiller", "mortgage_30y"})
 
 RATE_PP_INDICATORS = frozenset({
-    "cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y", "hy_spread", "yield_curve",
+    "cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "treasury_2y",
+    "mortgage_30y", "hy_spread", "yield_curve",
 })
 INDEX_DELTA_INDICATORS = frozenset({
     "consumer_sentiment", "pmi_manufacturing", "ism_services", "move", "vix", "case_shiller",
@@ -114,10 +121,13 @@ DIFFUSION_INDEX_LABELS: dict[str, str] = {
 
 SHORT_LABELS: dict[str, str] = {
     "btc": "BTC", "eth": "ETH", "sol": "SOL",
-    "sp500": "S&P 500", "nasdaq100": "NASDAQ",
+    "sp500": "S&P 500", "nasdaq100": "NASDAQ", "qqq": "QQQ",
+    "bond_etf_agg": "AGG", "bond_etf_bnd": "BND",
+    "crypto_etf_ibit": "IBIT", "crypto_etf_fbtc": "FBTC",
+    "dark_pool_spy": "DARK POOL",
     "gold": "GOLD", "silver": "SILVER", "oil": "OIL",
-    "vix": "VIX", "dxy": "DXY", "move": "MOVE",
-    "treasury_10y": "10Y YIELD", "yield_curve": "YIELD CURVE",
+    "vix": "VIX", "dxy": "DXY", "move": "MOVE INDEX",
+    "treasury_10y": "10Y YIELD", "treasury_2y": "2Y YIELD", "yield_curve": "YIELD CURVE",
     "hy_spread": "HY SPREAD", "mortgage_30y": "MORTGAGE RATE",
     "cpi_yoy": "CPI", "unemployment": "UNEMPLOYMENT",
     "jobless_claims": "JOBLESS CLAIMS", "consumer_sentiment": "CONSUMER SENTIMENT",
@@ -129,6 +139,10 @@ SHORT_LABELS: dict[str, str] = {
 KEY_LEVEL_CROSS_INDICATORS = frozenset({"vix", "yield_curve", "cpi_yoy", "fed_funds"})
 LIQ_LONG_PREFIX = "long_liq_usd:"
 LIQ_SHORT_PREFIX = "short_liq_usd:"
+AUX_VALUE_PREFIX = "aux_value:"
+FLOW_USD_PREFIX = "flow_usd:"
+OPTIONS_VOL_PREFIX = "options_vol:"
+OPTIONS_PCR_PREFIX = "options_pcr:"
 LIQ_SKEW_THRESHOLD = 0.65
 
 def _variant_index(alert: AlertTrigger, salt: str, count: int) -> int:
@@ -270,7 +284,13 @@ def _absolute_delta_suffix(alert: AlertTrigger, history: MoveHistory) -> str | N
     return f"({sign}{mag:.2f} vs prior)"
 
 
-def _format_level_extreme(phrase: str) -> str:
+def _format_level_extreme(phrase: str, *, indicator: str | None = None) -> str:
+    if phrase == "all-time low.":
+        if indicator == "consumer_sentiment":
+            return "Lowest reading on record — below 2008 and 2022 lows."
+        return "Lowest reading on record."
+    if phrase == "all-time high.":
+        return "Highest reading on record."
     if phrase.endswith("-day high."):
         return f"Highest reading in {phrase.split('-')[0]} days."
     if phrase.endswith("-day low."):
@@ -416,6 +436,31 @@ def hydrate_liq_from_reasons(alert: AlertTrigger) -> None:
             alert.liq_short_usd = float(reason.removeprefix(LIQ_SHORT_PREFIX))
 
 
+def aux_value_tokens(alert: AlertTrigger) -> list[str]:
+    tokens: list[str] = []
+    if alert.aux_value is not None:
+        tokens.append(f"{AUX_VALUE_PREFIX}{alert.aux_value:.6g}")
+    if alert.flow_usd is not None:
+        tokens.append(f"{FLOW_USD_PREFIX}{alert.flow_usd:.0f}")
+    if alert.options_volume is not None:
+        tokens.append(f"{OPTIONS_VOL_PREFIX}{alert.options_volume:.0f}")
+    if alert.options_pcr is not None:
+        tokens.append(f"{OPTIONS_PCR_PREFIX}{alert.options_pcr:.4f}")
+    return tokens
+
+
+def hydrate_aux_from_reasons(alert: AlertTrigger) -> None:
+    for reason in alert.reasons:
+        if reason.startswith(AUX_VALUE_PREFIX):
+            alert.aux_value = float(reason.removeprefix(AUX_VALUE_PREFIX))
+        elif reason.startswith(FLOW_USD_PREFIX):
+            alert.flow_usd = float(reason.removeprefix(FLOW_USD_PREFIX))
+        elif reason.startswith(OPTIONS_VOL_PREFIX):
+            alert.options_volume = float(reason.removeprefix(OPTIONS_VOL_PREFIX))
+        elif reason.startswith(OPTIONS_PCR_PREFIX):
+            alert.options_pcr = float(reason.removeprefix(OPTIONS_PCR_PREFIX))
+
+
 def _ensure_liq_breakdown(alert: AlertTrigger) -> None:
     """Fill long/short split from reasons or live OKX fetch (queued alerts may lack tokens)."""
     hydrate_liq_from_reasons(alert)
@@ -482,7 +527,7 @@ def _crypto_rarity_line(alert: AlertTrigger, history: MoveHistory) -> str | None
         return "Highest open interest on record."
 
     if history.level_extreme:
-        phrase = _format_level_extreme(history.level_extreme).rstrip(".")
+        phrase = _format_level_extreme(history.level_extreme, indicator=alert.indicator).rstrip(".")
         if family == "funding":
             return phrase.replace("Highest reading", "Highest funding").replace("Lowest reading", "Lowest funding")
         if family == "basis":
@@ -751,9 +796,9 @@ def _funding_headline(alert: AlertTrigger, history: MoveHistory) -> str:
     large = _is_large_move(alert, history)
     if side == "short":
         return _pick_variant(alert, "fund-h-neg", [
-            f"{asset} funding turns negative",
-            f"{asset} funding drops below zero",
-            f"{asset} funding flips negative",
+            f"{asset} shorts now pay longs",
+            f"{asset} funding negative — shorts pay longs",
+            f"{asset} leverage tilts short",
         ])
     if side == "long":
         if large:
@@ -798,9 +843,9 @@ def _funding_takeaway(alert: AlertTrigger, history: MoveHistory | None = None) -
     side = _funding_side(alert)
     if side == "short":
         return _pick_variant(alert, "fund-t-neg", [
-            "Shorts are becoming the more crowded side.",
-            "Positioning has shifted below neutral.",
-            "The market is leaning more short.",
+            "Leverage is no longer tilted long.",
+            "Shorts are paying longs to hold positions.",
+            "Negative funding favors shorts over longs.",
         ])
     if side == "long":
         return _pick_variant(alert, "fund-t-pos", [
@@ -975,6 +1020,10 @@ def _macro_headline(alert: AlertTrigger, history: MoveHistory) -> str:
     if ind == "unemployment":
         return "UNEMPLOYMENT RISE" if up else "UNEMPLOYMENT FALL"
     if ind == "consumer_sentiment":
+        if history.level_extreme == "all-time low.":
+            return "SENTIMENT RECORD LOW"
+        if history.level_extreme == "all-time high.":
+            return "SENTIMENT RECORD HIGH"
         return "SENTIMENT WEAK" if not up else "SENTIMENT STRONG"
     if ind == "pmi_manufacturing":
         return "MANUFACTURING WEAK" if not up else "MANUFACTURING STRONG"
@@ -1005,9 +1054,11 @@ def _rates_headline(alert: AlertTrigger, history: MoveHistory) -> str:
             return "CREDIT STRESS"
         return f"HY SPREAD {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
     if ind == "move":
-        return f"BOND VOL {_move_verb(alert, strong=True, history=history)}"
-    if ind == "treasury_10y":
+        return f"MOVE INDEX {_move_verb(alert, strong=True, history=history)}"
+    if ind in ("treasury_10y", "treasury_2y"):
         return f"YIELDS {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
+    if ind == "dark_pool_spy":
+        return f"DARK POOL ACTIVITY {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
     if ind == "dxy":
         return f"DOLLAR {_move_verb(alert, strong=alert.alert_tier in ('major', 'emergency'), history=history)}"
     if ind == "fed_funds":
@@ -1016,6 +1067,8 @@ def _rates_headline(alert: AlertTrigger, history: MoveHistory) -> str:
 
 
 def _event_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    if alert.indicator in ETF_ACTIVITY_INDICATORS:
+        return f"{_short_label(alert)} UNUSUAL ACTIVITY"
     if history.is_all_time_high:
         return f"{_short_label(alert)} RECORD HIGH"
     if alert.indicator in MACRO_INDICATORS or alert.is_macro:
@@ -1091,7 +1144,38 @@ def _data_lines_for_diffusion_index(alert: AlertTrigger, history: MoveHistory) -
     return [line]
 
 
+def _data_lines_for_dark_pool(alert: AlertTrigger) -> list[str]:
+    hydrate_aux_from_reasons(alert)
+    lines = [f"Off-exchange volume: {_format_value(alert)}"]
+    if alert.aux_value is not None:
+        lines.append(f"Dark pool %: {alert.aux_value:.1f}%")
+    return lines
+
+
+def _data_lines_for_etf_activity(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    hydrate_aux_from_reasons(alert)
+    vol_m = alert.value / 1_000_000
+    lines = [f"Volume: {vol_m:.1f}M shares"]
+    if alert.prev_value and alert.prev_value > 0:
+        ratio = alert.value / alert.prev_value
+        lines[0] += f" ({ratio:.2f}x prior)"
+    elif history.pct_change:
+        lines[0] += f" ({_format_pct_line(abs(history.pct_change), up=_direction_up(alert))})"
+    if alert.flow_usd is not None:
+        sign = "+" if alert.flow_usd > 0 else "-"
+        lines.append(f"Est. flow: {sign}${abs(alert.flow_usd) / 1e6:.0f}M (AUM change)")
+    if alert.options_volume is not None:
+        lines.append(f"Options vol: {alert.options_volume / 1e3:.0f}k contracts")
+    if alert.options_pcr is not None:
+        lines.append(f"Put/call ratio: {alert.options_pcr:.2f}")
+    return lines
+
+
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    if alert.indicator == "dark_pool_spy":
+        return _data_lines_for_dark_pool(alert)
+    if alert.indicator in ETF_ACTIVITY_INDICATORS:
+        return _data_lines_for_etf_activity(alert, history)
     if alert.indicator.endswith("_liquidations"):
         return _data_lines_for_liquidation(alert, history)
     if alert.indicator.endswith("_funding"):
@@ -1196,7 +1280,7 @@ def _context_line(alert: AlertTrigger, history: MoveHistory) -> str | None:
             decision.select("sqlite_rarity", line, sqlite_branch="ath")
         return line
     if history.level_extreme:
-        line = _format_level_extreme(history.level_extreme)
+        line = _format_level_extreme(history.level_extreme, indicator=alert.indicator)
         if decision is not None:
             decision.select("sqlite_rarity", line, sqlite_branch="level_extreme")
         return line
@@ -1272,8 +1356,8 @@ def _macro_context_fallback(alert: AlertTrigger, history: MoveHistory) -> str:
             "CPI reading cooled — disinflation signal.",
         ),
         "consumer_sentiment": (
-            "Sentiment strengthened — consumer outlook improving.",
-            "Sentiment weakened — consumer outlook deteriorating.",
+            "Consumer outlook improved on the latest reading.",
+            "Consumer outlook deteriorated on the latest reading.",
         ),
         "pmi_manufacturing": (
             "Manufacturing expanded — activity above breakeven.",
@@ -1383,12 +1467,14 @@ def _takeaway_for_alert(alert: AlertTrigger, history: MoveHistory | None = None)
         "cpi_yoy": ("inflation pressure narrative heating up", "inflation pressure narrative cooling"),
         "unemployment": ("labor market softening", "labor market strengthening"),
         "jobless_claims": ("labor data cooling", "labor data firming"),
-        "consumer_sentiment": ("consumer confidence strengthening", "consumer confidence weakening"),
+        "consumer_sentiment": ("spending outlook improving", "spending outlook at risk"),
         "pmi_manufacturing": ("manufacturing growth expectations improving", "manufacturing growth expectations weakening"),
         "ism_services": ("services growth expectations improving", "services growth expectations weakening"),
         "fed_funds": ("financial conditions tightening", "financial conditions easing"),
         "m2": ("liquidity expanding", "liquidity tightening"),
     }
+    if ind == "consumer_sentiment" and history.level_extreme == "all-time low.":
+        return "household pessimism worse than prior crisis lows"
     if ind in paired:
         return paired[ind][0 if up else 1]
     cross = _cross_direction(alert)
@@ -1441,8 +1527,12 @@ def _format_value(alert: AlertTrigger) -> str:
         if v >= 1_000_000:
             return f"${v / 1_000_000:.1f}M"
         return f"${v:,.0f}"
-    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
+    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "treasury_2y", "mortgage_30y"):
         return f"{v:.2f}%"
+    if alert.indicator == "dark_pool_spy":
+        return f"{v:.1f}M shares"
+    if alert.indicator in ETF_ACTIVITY_INDICATORS:
+        return f"{v / 1e6:.1f}M shares"
     if alert.indicator == "jobless_claims":
         if v >= 1000:
             k = v / 1000

@@ -42,7 +42,14 @@ SHORT_NAMES: dict[str, str] = {
     "eth": "ETH",
     "sol": "SOL",
     "sp500": "SPY",
-    "nasdaq100": "QQQ",
+    "nasdaq100": "NDX",
+    "qqq": "QQQ",
+    "bond_etf_agg": "AGG",
+    "bond_etf_bnd": "BND",
+    "crypto_etf_ibit": "IBIT",
+    "crypto_etf_fbtc": "FBTC",
+    "dark_pool_spy": "Dark Pool Vol",
+    "treasury_2y": "2Y Yield",
     "vix": "VIX",
     "dxy": "DXY",
     "treasury_10y": "10Y Yield",
@@ -53,6 +60,7 @@ SHORT_NAMES: dict[str, str] = {
     "fed_funds": "Fed Funds",
     "mortgage_30y": "30Y Mortgage",
     "hy_spread": "HY Spread",
+    "move": "MOVE Index",
     "fear_greed": "Fear & Greed",
     "consumer_sentiment": "Sentiment",
     "unemployment": "Unemployment",
@@ -252,8 +260,12 @@ def _format_chart_value(alert: AlertTrigger, value: float) -> str:
         if value >= 1_000_000:
             return f"${value / 1_000_000:.1f}M"
         return f"${value:,.0f}"
-    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
+    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "treasury_2y", "mortgage_30y"):
         return f"{value:.2f}%"
+    if alert.indicator == "dark_pool_spy":
+        return f"{value:.1f}M"
+    if alert.indicator == "crypto_etf_ibit":
+        return f"{value / 1e6:.1f}M"
     if value >= 1000:
         return f"${value:,.0f}"
     return f"{value:g}"
@@ -270,7 +282,7 @@ def _y_axis_label(alert: AlertTrigger) -> str:
         return "Futures vs spot (bps)"
     if alert.indicator.endswith("_open_interest"):
         return "Open interest (USD)"
-    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "mortgage_30y"):
+    if alert.indicator in ("cpi_yoy", "unemployment", "fed_funds", "treasury_10y", "treasury_2y", "mortgage_30y"):
         return "Level (%)"
     return alert.name
 
@@ -385,24 +397,24 @@ def _configure_liquidation_x_axis(ax, x_pos: list[int], dates: list[datetime]) -
     ax.tick_params(axis="x", colors=MUTED)
 
 
+def _x_axis_date_format(dates: list[datetime]) -> str:
+    if len(dates) < 2:
+        return "%b %d"
+    span = dates[-1] - dates[0]
+    if span < timedelta(hours=36):
+        return "%b %d %H:%M"
+    if span < timedelta(days=120):
+        return "%b %d"
+    return "%b '%y"
+
+
 def _configure_x_axis(ax, dates: list[datetime]) -> None:
     if len(dates) < 2:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
         return
-    span = dates[-1] - dates[0]
-    if span < timedelta(hours=36):
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, int(span.total_seconds() / 3600 / 5)), tz=ET))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d %H:%M", tz=ET))
-    elif span < timedelta(days=14):
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=1, tz=ET))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
-    elif span < timedelta(days=120):
-        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1, tz=ET))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d", tz=ET))
-    else:
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1, tz=ET))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y", tz=ET))
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right")
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=7, tz=ET))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter(_x_axis_date_format(dates), tz=ET))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha="right", fontsize=9)
 
 
 def _annotate_move(
@@ -428,15 +440,16 @@ def _annotate_move(
         },
         zorder=7,
     )
+    label_y = y_from + (y_to - y_from) * 0.55
     ax.text(
         x_to,
-        y_to,
+        label_y,
         label,
         color=color,
         fontsize=9,
         fontweight="bold",
         ha="left",
-        va="bottom",
+        va="center",
         bbox={
             "boxstyle": "round,pad=0.2",
             "facecolor": BG,
@@ -507,17 +520,17 @@ def render_line_chart(
     fig, ax = plt.subplots(figsize=(12, 6.75), facecolor=BG)
     ax.set_facecolor(PANEL)
 
-    if len(dates) >= 3:
-        ax.plot(
-            dates[:-1],
-            values[:-1],
-            color=line_color,
-            linewidth=2.0,
-            alpha=HISTORY_ALPHA,
-            marker="o",
-            markersize=3,
-            zorder=2,
-        )
+    ax.plot(
+        dates,
+        values,
+        color=line_color,
+        linewidth=2.0,
+        alpha=HISTORY_ALPHA,
+        marker="o",
+        markersize=3,
+        zorder=2,
+    )
+    if len(dates) >= 2:
         ax.plot(
             dates[-2:],
             values[-2:],
@@ -561,7 +574,7 @@ def render_line_chart(
                 values[-2],
                 last_x,
                 values[-1],
-                label="FLIP BELOW 0",
+                label="SHORTS PAY LONGS",
             )
     elif len(values) >= 2 and alert.prev_value is not None:
         if alert.value < alert.prev_value:
@@ -585,10 +598,16 @@ def render_line_chart(
 
     data_hi = max(values)
     data_lo = min(values)
-    ylim_top = data_hi * 1.2
-    ylim_bottom = 0.0
-    if data_lo > 0 and data_hi / max(data_lo, 1e-9) > 4:
-        ylim_bottom = max(0.0, data_lo * 0.85)
+    if alert.indicator.endswith("_funding"):
+        span = max(data_hi - data_lo, 1e-8)
+        pad = max(span * 0.25, 0.00003)
+        ylim_bottom = min(0.0, data_lo) - pad
+        ylim_top = max(0.0, data_hi) + pad
+    else:
+        ylim_top = data_hi * 1.2
+        ylim_bottom = 0.0
+        if data_lo > 0 and data_hi / max(data_lo, 1e-9) > 4:
+            ylim_bottom = max(0.0, data_lo * 0.85)
     ax.set_ylim(ylim_bottom, ylim_top)
 
     current = values[-1]

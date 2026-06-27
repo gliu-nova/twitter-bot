@@ -25,8 +25,10 @@ from src.posting.charts import (
     chart_title_for_alert,
 )
 from src.posting.compose import (
+    aux_value_tokens,
     compose_multi_tweet,
     compose_single_tweet,
+    hydrate_aux_from_reasons,
     hydrate_liq_from_reasons,
     liq_breakdown_tokens,
     should_attach_chart,
@@ -68,6 +70,7 @@ def _row_to_alert(row: sqlite3.Row, cfg: dict[str, Any]) -> AlertTrigger:
         alert_unit=str(settings.get("alert_unit", "percent")),
     )
     hydrate_liq_from_reasons(alert)
+    hydrate_aux_from_reasons(alert)
     return alert
 
 
@@ -354,6 +357,9 @@ def enqueue_alert(
     alert.score = score
     reasons = list(alert.reasons)
     for token in liq_breakdown_tokens(alert):
+        if token not in reasons:
+            reasons.append(token)
+    for token in aux_value_tokens(alert):
         if token not in reasons:
             reasons.append(token)
 

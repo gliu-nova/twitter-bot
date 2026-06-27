@@ -9,30 +9,28 @@ from pathlib import Path
 from typing import Any
 
 from market_memory import EventDB
-from market_memory.indicators import memory_query_for_indicator
+from market_memory.indicators import CRYPTO_DERIVATIVE_KEYS, INDICATOR_BY_KEY, memory_query_for_indicator
 from market_memory.models import EventCreate, SimilarityQuery
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = (ROOT.parent / "market-memory" / "data").resolve()
 
+_MEMORY_QUERY_KEYS = tuple(CRYPTO_DERIVATIVE_KEYS) + tuple(INDICATOR_BY_KEY.keys())
+
 INDICATOR_MEMORY_MAP: dict[str, dict[str, Any]] = {
     key: mapping
-    for key in (
-        "btc_liquidations", "eth_liquidations", "sol_liquidations",
-        "btc_funding", "eth_funding", "sol_funding",
-        "btc_basis", "eth_basis", "sol_basis",
-        "btc_exchange_spread", "eth_exchange_spread", "sol_exchange_spread",
-        "fed_funds",
-        "sp500", "nasdaq100", "vix", "dxy", "gold", "silver", "move",
-        "btc", "eth", "sol",
-        "oil", "hy_spread", "treasury_10y", "yield_curve",
-        "jobless_claims", "unemployment", "cpi_yoy", "m2",
-        "mortgage_30y", "consumer_sentiment", "case_shiller",
-        "pmi_manufacturing", "ism_services",
-        "fear_greed",
-    )
+    for key in _MEMORY_QUERY_KEYS
     if (mapping := memory_query_for_indicator(key)) is not None
 }
+_dp_vol_map = memory_query_for_indicator("dark_pool_volume")
+if _dp_vol_map:
+    INDICATOR_MEMORY_MAP.setdefault("dark_pool_spy", _dp_vol_map)
+
+PRICE_DIRECTION_INDICATORS = frozenset({
+    "btc", "eth", "sol", "sp500", "nasdaq100", "qqq",
+    "bond_etf_agg", "bond_etf_bnd", "crypto_etf_ibit", "crypto_etf_fbtc",
+    "gold", "silver", "oil",
+})
 
 
 @dataclass
@@ -104,8 +102,10 @@ def build_similarity_query(alert: Any, cfg: dict[str, Any]) -> SimilarityQuery |
         direction = _basis_direction(float(alert.value), alert.prev_value)
     elif alert.indicator.endswith("_exchange_spread"):
         direction = "wide"
-    elif alert.indicator in ("btc", "eth", "sol", "sp500", "nasdaq100", "gold", "silver", "oil"):
+    elif alert.indicator in PRICE_DIRECTION_INDICATORS:
         direction = _price_direction(float(alert.value), alert.prev_value)
+    elif alert.indicator in ("dark_pool_spy", "dark_pool_volume", "dark_pool_pct"):
+        direction = "spike" if alert.prev_value is not None and float(alert.value) > float(alert.prev_value) else None
     return SimilarityQuery(
         event_type=mapping["event_type"],
         asset=mapping.get("asset"),
@@ -197,7 +197,12 @@ def maybe_sync_market_memory(cfg: dict[str, Any]) -> dict[str, Any] | None:
 def _event_tags(indicator: str, mapping: dict[str, Any]) -> list[str]:
     if mapping.get("asset"):
         return ["crypto"]
-    if indicator in ("sp500", "nasdaq100", "vix"):
+    if indicator in (
+        "sp500", "nasdaq100", "qqq", "vix",
+        "bond_etf_agg", "bond_etf_bnd",
+        "crypto_etf_ibit", "crypto_etf_fbtc",
+        "dark_pool_spy",
+    ):
         return ["equities"]
     if indicator in ("gold", "silver", "oil"):
         return ["commodities"]
@@ -230,8 +235,10 @@ def record_posted_alert(alert: Any, cfg: dict[str, Any]) -> None:
             metadata["long_usd"] = alert.liq_long_usd
         if alert.liq_short_usd is not None:
             metadata["short_usd"] = alert.liq_short_usd
-    elif alert.indicator in ("btc", "eth", "sol", "sp500", "nasdaq100", "gold", "silver", "oil"):
+    elif alert.indicator in PRICE_DIRECTION_INDICATORS:
         direction = _price_direction(float(alert.value), alert.prev_value)
+    elif alert.indicator in ("dark_pool_spy", "dark_pool_volume", "dark_pool_pct"):
+        direction = "spike" if alert.prev_value is not None and alert.value > alert.prev_value else None
     pct = None
     if alert.prev_value not in (None, 0):
         pct = (alert.value - alert.prev_value) / abs(alert.prev_value) * 100

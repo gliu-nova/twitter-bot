@@ -48,6 +48,10 @@ def _source_for_health(source: str) -> str:
         return "hyperliquid"
     if source == "exchange_spread":
         return "kraken"
+    if source in ("finra_dark_pool_volume", "finra_dark_pool_pct", "finra_dark_pool"):
+        return "finra"
+    if source == "etf_activity":
+        return "yahoo"
     return source
 
 
@@ -92,11 +96,26 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
 
         liq_long_usd: float | None = None
         liq_short_usd: float | None = None
+        aux_value: float | None = None
+        etf_snap = None
         try:
             if settings.get("source") == "okx_liquidations":
                 from src.crypto_metrics import fetch_liquidation_metric
 
                 value, liq_long_usd, liq_short_usd, observed_at = fetch_liquidation_metric(settings)
+            elif settings.get("source") == "finra_dark_pool":
+                from src.finra_dark_pool import fetch_finra_dark_pool_both
+
+                value, aux_value, observed_at = fetch_finra_dark_pool_both(
+                    settings.get("symbol", "SPY"),
+                )
+            elif settings.get("source") == "etf_activity":
+                from src.etf_activity import fetch_etf_activity
+
+                etf_snap = fetch_etf_activity(settings["symbol"])
+                value = etf_snap.volume
+                aux_value = etf_snap.net_assets_usd
+                observed_at = etf_snap.observed_at
             else:
                 value, observed_at = fetch_indicator(settings)
         except (FetchError, requests.RequestException) as e:
@@ -135,6 +154,21 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
                 liq_long_usd=liq_long_usd,
                 liq_short_usd=liq_short_usd,
             )
+        elif key == "qqq":
+            from src.custom_alerts import check_qqq_alert
+
+            should_alert, alert = check_qqq_alert(conn, settings, value)
+            save_reading(conn, key, value, observed_at)
+        elif settings.get("source") == "finra_dark_pool":
+            from src.custom_alerts import check_dark_pool_alert
+
+            should_alert, alert = check_dark_pool_alert(conn, settings, value, aux_value or 0.0)
+            save_reading(conn, key, value, observed_at, aux_value=aux_value)
+        elif settings.get("source") == "etf_activity" and etf_snap is not None:
+            from src.custom_alerts import check_etf_activity_alert
+
+            should_alert, alert = check_etf_activity_alert(conn, settings, etf_snap)
+            save_reading(conn, key, value, observed_at, aux_value=aux_value)
         else:
             should_alert, alert = check_alert(conn, settings, value)
             save_reading(conn, key, value, observed_at)

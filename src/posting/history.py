@@ -8,11 +8,21 @@ import sqlite3
 from src.posting.models import AlertTrigger
 
 # Only claim ATH for series that trend to new highs (not yields, spreads, macro)
-ATH_INDICATORS = {"btc", "eth", "sol", "sp500", "nasdaq100", "gold", "silver"}
+ATH_INDICATORS = {
+    "btc", "eth", "sol", "sp500", "nasdaq100", "qqq",
+    "crypto_etf_fbtc",
+    "gold", "silver",
+}
 
 # Level-based high/low context (yields, spreads, vol — not ATH price series)
+RECORD_EXTREME_INDICATORS = {
+    "consumer_sentiment",
+    "fear_greed",
+}
+
 LEVEL_EXTREME_INDICATORS = {
     "treasury_10y",
+    "treasury_2y",
     "fed_funds",
     "mortgage_30y",
     "hy_spread",
@@ -94,6 +104,30 @@ def _apply_level_extreme(
     return history
 
 
+def _apply_record_extreme(
+    conn: sqlite3.Connection,
+    alert: AlertTrigger,
+    history: MoveHistory,
+) -> MoveHistory:
+    """Full-series record highs/lows for survey-style indices."""
+    if alert.indicator not in RECORD_EXTREME_INDICATORS:
+        return history
+    row = conn.execute(
+        """SELECT MIN(value) AS lo, MAX(value) AS hi, COUNT(*) AS n
+           FROM readings WHERE indicator = ?""",
+        (alert.indicator,),
+    ).fetchone()
+    if not row or row["n"] < 12:
+        return history
+    lo = float(row["lo"])
+    hi = float(row["hi"])
+    if alert.value <= lo + 1e-6:
+        history.level_extreme = "all-time low."
+    elif alert.value >= hi - 1e-6:
+        history.level_extreme = "all-time high."
+    return history
+
+
 def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHistory:
     history = MoveHistory()
     if alert.indicator.endswith("_liquidations"):
@@ -101,7 +135,7 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
 
         history.liquidation_rank = liquidation_rank_phrase(conn, alert.indicator, alert.value)
     if alert.prev_value is None:
-        return history
+        return _apply_record_extreme(conn, alert, history)
 
     prev = alert.prev_value
     value = alert.value
@@ -110,7 +144,9 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
 
     daily = _daily_closes(conn, alert.indicator)
     if len(daily) < 2:
-        return _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
+        return _apply_record_extreme(
+            conn, alert, _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
+        )
 
     changes: list[tuple[str, float]] = []
     for i in range(1, len(daily)):
@@ -122,7 +158,9 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
         changes.append((c_day, pct))
 
     if not changes:
-        return _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
+        return _apply_record_extreme(
+            conn, alert, _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
+        )
 
     # Prefer day-over-day change from stored daily closes
     last_pct = changes[-1][1]
@@ -146,7 +184,9 @@ def build_move_history(conn: sqlite3.Connection, alert: AlertTrigger) -> MoveHis
         history.is_largest_ytd = True
         history.ytd_move_count = len(ytd_moves)
 
-    return _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
+    return _apply_record_extreme(
+        conn, alert, _apply_level_extreme(daily, alert, _apply_ath(conn, alert, history))
+    )
 
 
 def _apply_ath(conn: sqlite3.Connection, alert: AlertTrigger, history: MoveHistory) -> MoveHistory:

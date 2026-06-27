@@ -25,6 +25,10 @@ class AlertTrigger:
     standalone_major: bool = False
     liq_long_usd: float | None = None
     liq_short_usd: float | None = None
+    aux_value: float | None = None
+    flow_usd: float | None = None
+    options_volume: float | None = None
+    options_pcr: float | None = None
 
 
 @dataclass
@@ -65,10 +69,18 @@ CATEGORY_GROUPS: dict[str, set[str]] = {
         "btc_liquidations",
         "eth_liquidations",
         "sol_liquidations",
+        "crypto_etf_ibit",
+        "crypto_etf_fbtc",
     },
-    "rates_fx": {"dxy", "treasury_10y", "fed_funds", "yield_curve", "move"},
+    "rates_fx": {
+        "dxy", "treasury_10y", "treasury_2y", "fed_funds", "yield_curve", "move",
+        "bond_etf_agg", "bond_etf_bnd",
+    },
     "macro_data": {"cpi_yoy", "unemployment", "pmi_manufacturing", "ism_services", "jobless_claims", "consumer_sentiment"},
-    "equities_vol": {"sp500", "nasdaq100", "vix", "hy_spread"},
+    "equities_vol": {
+        "sp500", "nasdaq100", "qqq", "vix", "hy_spread",
+        "dark_pool_spy",
+    },
     "housing": {"case_shiller", "mortgage_30y"},
     "commodities": {"gold", "silver", "oil"},
 }

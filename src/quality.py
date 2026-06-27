@@ -193,4 +193,19 @@ def check_api_health() -> dict[str, str]:
     except Exception as e:
         results["coinbase"] = str(e)
 
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        import httpx
+        from market_memory.sources import fetch_finra_dark_pool_history
+
+        since = datetime.now(timezone.utc) - timedelta(days=10)
+        with httpx.Client() as client:
+            vol, _pct = fetch_finra_dark_pool_history(client, since=since, symbol="SPY")
+        if not vol:
+            raise RuntimeError("no FINRA Reg SHO rows")
+        results["finra"] = "ok"
+    except Exception as e:
+        results["finra"] = str(e)
+
     return results

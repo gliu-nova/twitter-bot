@@ -25,8 +25,14 @@ CRYPTO_KEYS = {
     "eth_liquidations",
     "sol_liquidations",
 }
-US_EQUITY_KEYS = {"sp500", "nasdaq100", "vix", "gold", "silver", "dxy", "oil"}
-RATES_FX_KEYS = {"treasury_10y", "yield_curve", "fed_funds", "move", "hy_spread"}
+US_EQUITY_KEYS = {
+    "sp500", "nasdaq100", "qqq",
+    "bond_etf_agg", "bond_etf_bnd",
+    "crypto_etf_ibit", "crypto_etf_fbtc",
+    "dark_pool_spy",
+    "vix", "gold", "silver", "dxy", "oil",
+}
+RATES_FX_KEYS = {"treasury_10y", "treasury_2y", "yield_curve", "fed_funds", "move", "hy_spread"}
 HOUSING_KEYS = {"case_shiller", "mortgage_30y"}
 MACRO_KEYS = {
     "cpi_yoy",
