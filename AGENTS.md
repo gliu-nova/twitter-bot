@@ -1,21 +1,5 @@
 # AGENTS.md - Grok Build Instructions
 
-## Project Overview
-Python bot that ingests market/macro indicators (Yahoo, FRED, CoinGecko), stores readings in SQLite, and posts X/Twitter alerts when configurable thresholds are crossed. Config: `config.yaml`. Entry point: `run.py`.
-
-## X/Twitter Post Format (`src/posting/compose.py`)
-Posts must be scannable, not text blobs. Max ~280 characters. Tone: professional, data-driven.
-
-**Structure** (blank line between sections):
-1. Headline (indicator name; `MAJOR MOVE:` prefix only for exceptional events)
-2. Data — values and % changes on separate lines when useful
-3. Context — one short line (rarity, level break, historic spike)
-4. Takeaway — `→` prefix, one concise line
-
-**Emojis:** Max 1 per post (`🚨` `⚠️` `📈` `📉`). Use only for exceptional moves (emergency tier, ATH, standalone major liquidations, key macro breaks). Most posts have **no** emoji.
-
-**Style:** Succinct. Avoid editorializing. Numbers lead; context follows.
-
 ## Core Coding Principles
 
 ### 1. Think Before Coding
@@ -68,12 +52,12 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-text## Output Style & Readability
+## Output Style & Readability
 - Prioritize **readability and maintainability**.
 - Use clear variable/function names.
 - Add minimal but helpful comments only where logic is non-obvious.
 - Keep functions small and focused.
-- Prefer modern, clean C++ / Python idioms.
+- Prefer modern, clean Python idioms.
 
 ## Git & Commit Workflow
 
