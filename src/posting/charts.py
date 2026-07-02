@@ -578,13 +578,14 @@ def render_line_chart(
             )
     elif len(values) >= 2 and alert.prev_value is not None:
         if alert.value < alert.prev_value:
+            drop_label = "NEW LOW" if alert.indicator in ("consumer_sentiment", "fear_greed") else "COMPRESSION"
             _annotate_move(
                 ax,
                 mdates.date2num(dates[-2]),
                 values[-2],
                 last_x,
                 values[-1],
-                label="COMPRESSION",
+                label=drop_label,
             )
         elif alert.value > alert.prev_value:
             _annotate_move(

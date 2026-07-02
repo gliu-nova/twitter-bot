@@ -228,15 +228,15 @@ def fetch_chart_history(settings: dict[str, Any], *, months: int = 6) -> list[tu
         return out
 
     if source == "fred":
-        limit = max(30, months * 31)
+        start = (datetime.now(timezone.utc) - timedelta(days=months * 31)).strftime("%Y-%m-%d")
         resp = requests.get(
             FRED_BASE,
             params={
                 "series_id": settings["series"],
                 "api_key": _fred_api_key(),
                 "file_type": "json",
-                "sort_order": "desc",
-                "limit": limit,
+                "sort_order": "asc",
+                "observation_start": start,
             },
             timeout=30,
         )
@@ -246,7 +246,7 @@ def fetch_chart_history(settings: dict[str, Any], *, months: int = 6) -> list[tu
             for obs in resp.json().get("observations", [])
             if obs.get("value") not in (None, ".", "")
         ]
-        return sorted(observations)
+        return observations
 
     if source == "fred_cpi_yoy":
         limit = max(24, months * 2 + 14)
