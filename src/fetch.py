@@ -71,7 +71,7 @@ def _fred_api_key() -> str:
 
 
 def _fred_latest(series_id: str) -> tuple[float, str]:
-    resp = requests.get(
+    resp = _http_get(
         FRED_BASE,
         params={
             "series_id": series_id,
@@ -81,11 +81,8 @@ def _fred_latest(series_id: str) -> tuple[float, str]:
             "limit": 5,
         },
         timeout=30,
+        label=f"FRED {series_id}",
     )
-    try:
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        raise FetchError(f"FRED error for {series_id}: {e}") from e
     body = resp.json()
     if body.get("error_code"):
         raise FetchError(f"FRED error for {series_id}: {body.get('error_message', body)}")
@@ -99,7 +96,7 @@ def _fred_latest(series_id: str) -> tuple[float, str]:
 
 
 def _fred_cpi_yoy(series_id: str) -> tuple[float, str]:
-    resp = requests.get(
+    resp = _http_get(
         FRED_BASE,
         params={
             "series_id": series_id,
@@ -109,8 +106,8 @@ def _fred_cpi_yoy(series_id: str) -> tuple[float, str]:
             "limit": 24,
         },
         timeout=30,
+        label=f"FRED CPI {series_id}",
     )
-    resp.raise_for_status()
     observations = [
         (obs["date"], float(obs["value"]))
         for obs in resp.json().get("observations", [])
@@ -132,16 +129,26 @@ def _shift_year(date_str: str) -> str:
 
 
 def _yahoo_latest(symbol: str) -> tuple[float, str]:
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="5d")
-    if hist.empty:
-        raise FetchError(f"No Yahoo data for {symbol}")
-    valid = hist.dropna(subset=["Close"])
-    if valid.empty:
-        raise FetchError(f"No valid Yahoo close for {symbol}")
-    row = valid.iloc[-1]
-    observed = valid.index[-1].strftime("%Y-%m-%d")
-    return float(row["Close"]), observed
+    last_err: Exception | None = None
+    for attempt in range(HTTP_RETRIES + 1):
+        try:
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period="5d")
+            if hist.empty:
+                raise FetchError(f"No Yahoo data for {symbol}")
+            valid = hist.dropna(subset=["Close"])
+            if valid.empty:
+                raise FetchError(f"No valid Yahoo close for {symbol}")
+            row = valid.iloc[-1]
+            observed = valid.index[-1].strftime("%Y-%m-%d")
+            return float(row["Close"]), observed
+        except FetchError:
+            raise
+        except Exception as e:
+            last_err = e
+            if attempt < HTTP_RETRIES:
+                time.sleep(1.0 * (attempt + 1))
+    raise FetchError(f"Yahoo request failed for {symbol}: {last_err}") from last_err
 
 
 def _coingecko_latest(coin_id: str) -> tuple[float, str]:

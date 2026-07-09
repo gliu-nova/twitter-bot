@@ -360,9 +360,13 @@ def daily_readings_since(
 
 
 def hours_since_indicator_post(conn: sqlite3.Connection, indicator: str) -> float | None:
+    # Match exact comma-separated tokens to avoid substring collisions
+    # (e.g. "btc" must not match "btc_funding").
     row = conn.execute(
-        "SELECT posted_at FROM post_log WHERE indicators LIKE ? ORDER BY posted_at DESC LIMIT 1",
-        (f"%{indicator}%",),
+        """SELECT posted_at FROM post_log
+           WHERE (',' || indicators || ',') LIKE ?
+           ORDER BY posted_at DESC LIMIT 1""",
+        (f"%,{indicator},%",),
     ).fetchone()
     if not row:
         alert_row = conn.execute(
@@ -375,3 +379,14 @@ def hours_since_indicator_post(conn: sqlite3.Connection, indicator: str) -> floa
     else:
         posted = datetime.fromisoformat(row["posted_at"])
     return (datetime.now(timezone.utc) - posted).total_seconds() / 3600
+
+
+def prune_old_readings(conn: sqlite3.Connection, *, keep_days: int = 400) -> int:
+    """Delete readings older than keep_days. Returns rows deleted."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+    cur = conn.execute(
+        "DELETE FROM readings WHERE recorded_at < ?",
+        (cutoff,),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)

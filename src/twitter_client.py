@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import tweepy
+
+TWITTER_RETRIES = 2
 
 
 def post_tweet(text: str, *, media_path: str | Path | None = None) -> None:
@@ -34,9 +37,28 @@ def post_tweet(text: str, *, media_path: str | Path | None = None) -> None:
             uploaded = api.media_upload(filename=str(path))
             media_ids = [uploaded.media_id]
 
-    try:
-        client.create_tweet(text=text[:280], media_ids=media_ids)
-    except tweepy.TweepyException as e:
-        print(f"Tweet failed: {e}", file=__import__("sys").stderr)
-        raise
-    print("Tweet posted." + (f" (media: {media_path})" if media_path else ""))
+    last_err: Exception | None = None
+    for attempt in range(TWITTER_RETRIES + 1):
+        try:
+            client.create_tweet(text=text[:280], media_ids=media_ids)
+            print("Tweet posted." + (f" (media: {media_path})" if media_path else ""))
+            return
+        except tweepy.TweepyException as e:
+            last_err = e
+            transient = _is_transient_twitter_error(e)
+            if attempt < TWITTER_RETRIES and transient:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            print(f"Tweet failed: {e}", file=__import__("sys").stderr)
+            raise
+    if last_err:
+        raise last_err
+
+
+def _is_transient_twitter_error(exc: Exception) -> bool:
+    status = getattr(exc, "response", None)
+    code = getattr(status, "status_code", None) if status is not None else None
+    if code in (429, 500, 502, 503, 504):
+        return True
+    msg = str(exc).lower()
+    return "rate limit" in msg or "over capacity" in msg or "timeout" in msg

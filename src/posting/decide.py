@@ -59,10 +59,5 @@ def decide_tweet_type(
                 theme=theme,
             )
 
-    # Fallback: highest-scoring single
-    return TweetDecision(
-        tweet_type="single",
-        alerts=[top_alert],
-        score=top_alert.score,
-        is_emergency=top_alert.alert_tier == "emergency" or top_alert.score >= emergency_threshold,
-    )
+    # No qualifying single or multi — keep alerts queued for a stronger window
+    return None

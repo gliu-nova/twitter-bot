@@ -1,9 +1,21 @@
 # AGENTS.md - Grok Build Instructions
 
+## Repo context
+
+This is a **Python Twitter/X market-indicator bot**:
+
+- Config-driven indicators in `config.yaml` (~43 keys)
+- SQLite state in `data/indicators.db` (readings, pending alerts, post log)
+- Optional DuckDB context via the `market-memory` package (`src/market_memory_bridge.py`)
+- Production runner: GitHub Actions (`.github/workflows/bot.yml`) + external hourly cron
+- Entry: `python run.py` → `src/main.py`
+
+There is **no** Cloudflare D1/R2 pipeline in this repository.
+
 ## Core Coding Principles
 
 ### 1. Think Before Coding
-Don't assume. Don't hide confusion. Surface tradeoffs.  
+Don't assume. Don't hide confusion. Surface tradeoffs.
 Before implementing:
 
 * State your assumptions explicitly. If uncertain, ask.
@@ -62,16 +74,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ## Testing & Reliability
 
 - Write or update tests for new/changed functionality (unit for core logic, integration for jobs/pipelines).
-- Use DuckDB for testing analytics queries where possible.
+- Run `python -m unittest discover -s tests -v` for targeted changes (CI runs this before the live bot).
 - Make jobs idempotent and resumable.
-- Add input validation and graceful error handling with retries (especially for API polling and R2/D1 operations).
+- Add input validation and graceful error handling with retries (especially for API polling).
 - Prefer deterministic behavior and clear logging for debugging scheduled jobs.
 
 ## Documentation
 
 - Update README.md or relevant docs when adding features, new CLI commands, or changing architecture.
 - Include usage examples for new CLI commands.
-- Keep architecture diagrams (text-based) up to date if present.
 
 ## Git & Commit Workflow
 
@@ -84,12 +95,8 @@ After any code change or refactor you perform:
 - Output the commit message clearly at the end of your response, e.g.:
 
 ```commit
-refactor(pipeline): migrate raw storage to tiered R2 + DuckDB architecture
-
-- Moved historical snapshots to partitioned JSONL/Parquet in R2
-- Updated D1 tables to only hold compact serving data
-- Added build_features and backtest_opportunities batch jobs
-- Preserved all existing live bot behavior
+fix(alerts): escalate cooldown on magnitude for crashes and spikes
+```
 
 ## Final Response Marker
 **Every time you have fully completed the entire user request, end your final response with exactly:**

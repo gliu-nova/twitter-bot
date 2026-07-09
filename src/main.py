@@ -85,9 +85,20 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             skipped_fetch += 1
             continue
 
-        src_health = _source_for_health(settings["source"])
-        health_msg = health.get(src_health, "")
-        api_ok = health_msg == "ok"
+        source = settings["source"]
+        if source == "exchange_spread":
+            # Spread needs both legs healthy
+            kraken_ok = health.get("kraken") == "ok"
+            coinbase_ok = health.get("coinbase") == "ok"
+            api_ok = kraken_ok and coinbase_ok
+            health_msg = (
+                f"kraken={health.get('kraken')}, coinbase={health.get('coinbase')}"
+            )
+            src_health = "exchange_spread"
+        else:
+            src_health = _source_for_health(source)
+            health_msg = health.get(src_health, "")
+            api_ok = health_msg == "ok"
         if not api_ok:
             detail = f"API unhealthy ({src_health}: {health_msg})"
             print(f"[{key}] skipped ({detail})", file=sys.stderr)
@@ -226,6 +237,15 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     posted = process_posting_queue(conn, cfg, force=force_post)
     if posted:
         print(f"Posted {posted} tweet(s)")
+
+    try:
+        from src.db import prune_old_readings
+
+        deleted = prune_old_readings(conn, keep_days=400)
+        if deleted:
+            print(f"Pruned {deleted} reading(s) older than 400 days")
+    except Exception as exc:
+        print(f"[db] prune skipped: {exc}", file=sys.stderr)
 
     sync_report = None
     try:

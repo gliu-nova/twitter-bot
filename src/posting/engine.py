@@ -145,13 +145,18 @@ def _emergency_escalation_allows_repost(
     settings: dict[str, Any],
 ) -> bool:
     """Allow a same-day repost only when emergency tier and size clearly escalated."""
-    if alert.alert_tier != "emergency":
-        return False
+    from src.alerts import emergency_escalation_allows
+
     row = last_alert(conn, alert.indicator)
     if not row or row["last_value"] is None:
         return False
     mult = float(settings.get("emergency_escalation_multiplier", 2.0))
-    return alert.value >= float(row["last_value"]) * mult
+    return emergency_escalation_allows(
+        tier=alert.alert_tier,
+        value=alert.value,
+        last_value=float(row["last_value"]),
+        multiplier=mult,
+    )
 
 
 def _in_cooldown(
@@ -489,6 +494,24 @@ def process_posting_queue(
 
         decision = decide_tweet_type(alerts, posting_cfg)
         if not decision:
+            if alerts:
+                top = max(alerts, key=lambda alert: alert.score)
+                post_threshold = float(posting_cfg.get("high_single_threshold", 85))
+                primary, secondary = classify_post_skip(
+                    gate="below_threshold",
+                    score=top.score,
+                    post_threshold=post_threshold,
+                )
+                skipped_candidates.append(
+                    SkippedPostCandidate(
+                        alert=top,
+                        primary_skip_reason=primary,
+                        secondary_skip_reason=secondary,
+                        skip_detail="below_post_threshold",
+                        score=top.score,
+                        post_threshold=post_threshold,
+                    ),
+                )
             continue
 
         # Diversity: prefer macro if crypto streak too long
@@ -629,8 +652,8 @@ def process_posting_queue(
             except Exception as exc:
                 print(f"[posting] market-memory record skipped: {exc}")
 
-        # Mark entire batch processed (including unselected alerts from same window)
-        mark_alerts_processed(conn, [a.db_id for a in raw_alerts if a.db_id])
+        # Mark only alerts included in the tweet; leave siblings queued for later flush
+        mark_alerts_processed(conn, [a.db_id for a in decision.alerts if a.db_id])
         posted += 1
 
         if not decision.is_emergency and _daily_cap_reached(conn, posting_cfg):

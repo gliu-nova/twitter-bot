@@ -12,7 +12,7 @@ from src.posting.models import AlertTrigger
 
 ContextSource = Literal["sqlite_rarity", "market_memory", "template_fallback", "none"]
 ExplainOutcome = Literal["posted", "skipped"]
-PostSkipGate = Literal["buffered", "stale", "cooldown", "daily_cap"]
+PostSkipGate = Literal["buffered", "stale", "cooldown", "daily_cap", "below_threshold"]
 PrimarySkipReason = Literal["below_threshold", "buffered", "stale", "cooldown", "daily_cap"]
 SecondarySkipReason = Literal["below_threshold", "cooldown", "daily_cap", "stale", "buffered"]
 
@@ -114,6 +114,8 @@ def classify_post_skip(
         if below_threshold:
             return "below_threshold", "daily_cap"
         return "daily_cap", None
+    if gate == "below_threshold":
+        return "below_threshold", None
     raise ValueError(f"unknown post skip gate: {gate}")
 
 

@@ -1,7 +1,6 @@
 # Data polling — how often to fetch each tier (posting rules unchanged).
-# launchd ticks every tick_minutes; each indicator fetches on its own schedule.
+# Outer tick (GitHub Actions / launchd) is independent; each indicator uses these intervals.
 scheduler:
-  tick_minutes: 15
   crypto_minutes: 10
   market_minutes: 10
   market_off_hours_minutes: 60
@@ -28,7 +27,7 @@ posting:
   daily_post_cap: 8          # regular posts only; emergencies bypass this cap
   # indicator_cooldown_hours: global min between posts per indicator (non-emergency).
   # Emergencies honor each indicator's cooldown_hours (24h for liquidations).
-  # Same-day repost only if emergency tier AND value >= emergency_escalation_multiplier x last post.
+  # Same-day repost only if emergency tier AND |value| escalated by emergency_escalation_multiplier vs last post.
   emergency_threshold: 90
   high_single_threshold: 85
   multi_threshold: 120
@@ -702,8 +701,7 @@ indicators:
     normal_alert: 100
     major_alert: 180
     emergency_alert: 300
-    rules:
-      - type: liquidation_spike
+    # Alerts via liquidations.check_liquidation_alert (dynamic threshold), not rules[]
 
   eth_liquidations:
     name: "ETH Liquidations (1h)"
@@ -717,8 +715,6 @@ indicators:
     normal_alert: 75
     major_alert: 150
     emergency_alert: 300
-    rules:
-      - type: liquidation_spike
 
   sol_liquidations:
     name: "SOL Liquidations (1h)"
@@ -732,8 +728,6 @@ indicators:
     normal_alert: 80
     major_alert: 160
     emergency_alert: 320
-    rules:
-      - type: liquidation_spike
 
   fed_funds:
     name: "Fed Funds Rate"

@@ -6,9 +6,16 @@ from typing import Any
 
 import sqlite3
 
-from src.alerts import _absolute_change, _detect_tier, _in_cooldown, _pct_change
+from src.alerts import (
+    _absolute_change,
+    _detect_tier,
+    _in_cooldown,
+    _pct_change,
+    emergency_escalation_allows,
+)
 from src.db import liquidation_readings_since
 from src.posting.models import AlertTrigger
+from src.stats import percentile
 
 FLUSH_SKEW_THRESHOLD = 0.65
 
@@ -23,18 +30,6 @@ def _parse_observed(ts: str) -> datetime:
     return datetime.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
-def _percentile(values: list[float], pct: float) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    k = (len(ordered) - 1) * (pct / 100)
-    lo = int(k)
-    hi = min(lo + 1, len(ordered) - 1)
-    if lo == hi:
-        return ordered[lo]
-    return ordered[lo] + (k - lo) * (ordered[hi] - ordered[lo])
-
-
 def dynamic_liquidation_threshold(
     conn: sqlite3.Connection,
     indicator: str,
@@ -47,7 +42,7 @@ def dynamic_liquidation_threshold(
         return floor
 
     totals = [total for _, total, _, _ in rows]
-    p95 = _percentile(totals, 95)
+    p95 = percentile(totals, 95)
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     last_24h = [total for ts, total, _, _ in rows if _parse_observed(ts) >= cutoff]
@@ -125,7 +120,9 @@ def check_liquidation_alert(
         tier = _detect_tier(settings, prev, total_usd)
         last_val = float(alert_row["last_value"]) if alert_row and alert_row["last_value"] is not None else None
         mult = float(settings.get("emergency_escalation_multiplier", 2.0))
-        if not (tier == "emergency" and last_val is not None and total_usd >= last_val * mult):
+        if not emergency_escalation_allows(
+            tier=tier, value=total_usd, last_value=last_val, multiplier=mult
+        ):
             return False, None
 
     flush = classify_liquidation_flush(long_usd, short_usd, total_usd)

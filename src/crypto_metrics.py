@@ -137,34 +137,64 @@ def _exchange_spread(kraken_pair: str, coinbase_product: str) -> tuple[float, st
 
 
 def _okx_liquidations(uly: str, *, window_minutes: int) -> tuple[float, float, float, str]:
-    resp = _http_get(
-        f"{OKX_BASE}/public/liquidation-orders",
-        params={"instType": "SWAP", "uly": uly, "state": "filled", "limit": 100},
-        label=f"OKX liquidations {uly}",
-    )
-    body = resp.json()
-    if body.get("code") != "0":
-        raise FetchError(f"OKX liquidations error for {uly}: {body.get('msg', body)}")
-
+    """Sum filled liquidations in the window, paginating past the 100-row page size."""
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     cutoff = now_ms - window_minutes * 60 * 1000
     long_usd = 0.0
     short_usd = 0.0
-    for bucket in body.get("data", []):
-        for detail in bucket.get("details", []):
-            ts = int(detail.get("time") or detail.get("ts") or 0)
-            if ts < cutoff:
-                continue
-            usd = float(detail["sz"]) * float(detail["bkPx"])
-            pos = (detail.get("posSide") or "").lower()
-            if pos == "long":
-                long_usd += usd
-            elif pos == "short":
-                short_usd += usd
-            elif (detail.get("side") or "").lower() == "sell":
-                long_usd += usd
-            else:
-                short_usd += usd
+    after: str | None = None
+    max_pages = 20
+
+    for _ in range(max_pages):
+        params: dict[str, Any] = {
+            "instType": "SWAP",
+            "uly": uly,
+            "state": "filled",
+            "limit": 100,
+        }
+        if after is not None:
+            params["after"] = after
+
+        resp = _http_get(
+            f"{OKX_BASE}/public/liquidation-orders",
+            params=params,
+            label=f"OKX liquidations {uly}",
+        )
+        body = resp.json()
+        if body.get("code") != "0":
+            raise FetchError(f"OKX liquidations error for {uly}: {body.get('msg', body)}")
+
+        buckets = body.get("data") or []
+        if not buckets:
+            break
+
+        oldest_ts = now_ms
+        page_ids: list[str] = []
+        for bucket in buckets:
+            if bucket.get("ordId"):
+                page_ids.append(str(bucket["ordId"]))
+            for detail in bucket.get("details", []):
+                ts = int(detail.get("time") or detail.get("ts") or 0)
+                if ts and ts < oldest_ts:
+                    oldest_ts = ts
+                if ts < cutoff:
+                    continue
+                usd = float(detail["sz"]) * float(detail["bkPx"])
+                pos = (detail.get("posSide") or "").lower()
+                if pos == "long":
+                    long_usd += usd
+                elif pos == "short":
+                    short_usd += usd
+                elif (detail.get("side") or "").lower() == "sell":
+                    long_usd += usd
+                else:
+                    short_usd += usd
+
+        if oldest_ts < cutoff or len(buckets) < 100 or not page_ids:
+            break
+        # OKX `after` = older than this order id (paginate toward the past)
+        after = page_ids[-1]
+
     return long_usd + short_usd, long_usd, short_usd, _now_ts()
 
 

@@ -25,6 +25,27 @@ def _in_cooldown(last_alert_at: str | None, hours: float) -> bool:
     return datetime.now(timezone.utc) - last < timedelta(hours=hours)
 
 
+def emergency_escalation_allows(
+    *,
+    tier: str,
+    value: float,
+    last_value: float | None,
+    multiplier: float,
+) -> bool:
+    """True when emergency tier and |value| clearly escalated vs last alert.
+
+    Uses max/min abs ratio so both spikes and crashes can break cooldown
+    (e.g. 100→50 with mult=2 is a 2x move, same as 100→200).
+    """
+    if tier != "emergency" or last_value is None:
+        return False
+    hi = max(abs(value), abs(last_value))
+    lo = min(abs(value), abs(last_value))
+    if lo == 0:
+        return hi > 0
+    return hi / lo >= multiplier
+
+
 def _detect_tier(settings: dict[str, Any], prev: float | None, value: float) -> str:
     if prev is None:
         return "normal"
@@ -137,7 +158,9 @@ def check_alert(
         tier = _detect_tier(settings, prev, value)
         last_val = float(alert_row["last_value"]) if alert_row and alert_row["last_value"] is not None else None
         mult = float(settings.get("emergency_escalation_multiplier", 2.0))
-        if not (tier == "emergency" and last_val is not None and value >= last_val * mult):
+        if not emergency_escalation_allows(
+            tier=tier, value=value, last_value=last_val, multiplier=mult
+        ):
             return False, None
     reasons: list[str] = []
     rule_types: list[str] = []

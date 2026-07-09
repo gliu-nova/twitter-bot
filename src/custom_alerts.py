@@ -7,7 +7,13 @@ from typing import Any
 
 import sqlite3
 
-from src.alerts import _absolute_change, _detect_tier, _in_cooldown, _pct_change
+from src.alerts import (
+    _absolute_change,
+    _detect_tier,
+    _in_cooldown,
+    _pct_change,
+    emergency_escalation_allows,
+)
 from src.etf_activity import EtfActivitySnapshot
 from src.posting.models import AlertTrigger
 from src.stats import daily_pct_changes, percentile, trailing_average
@@ -126,7 +132,9 @@ def check_qqq_alert(
         ).fetchone()
         last_val = float(alert_row["last_value"]) if alert_row and alert_row["last_value"] is not None else None
         mult = float(settings.get("emergency_escalation_multiplier", 2.0))
-        if not (tier == "emergency" and last_val is not None and value >= last_val * mult):
+        if not emergency_escalation_allows(
+            tier=tier, value=value, last_value=last_val, multiplier=mult
+        ):
             return False, None
 
     alert = _build_alert(settings, value=value, prev=prev, reasons=reasons, rule_types=rule_types)
@@ -135,14 +143,47 @@ def check_qqq_alert(
     return True, alert
 
 
-def _dark_pool_history(symbol: str, *, days: int = 220) -> tuple[list[float], list[float]]:
+def _dark_pool_history_from_db(
+    conn: sqlite3.Connection,
+    indicator: str,
+    *,
+    days: int = 220,
+) -> tuple[list[float], list[float]]:
+    """Prefer stored readings; fall back to network only when history is thin."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    rows = conn.execute(
+        """SELECT value, aux_value, observed_at FROM readings
+           WHERE indicator = ? AND observed_at >= ?
+           ORDER BY observed_at ASC""",
+        (indicator, cutoff),
+    ).fetchall()
+    vol_vals: list[float] = []
+    pct_vals: list[float] = []
+    for row in rows:
+        vol_vals.append(float(row["value"]))
+        if row["aux_value"] is not None:
+            pct_vals.append(float(row["aux_value"]))
+    return vol_vals, pct_vals
+
+
+def _dark_pool_history(
+    conn: sqlite3.Connection,
+    settings: dict[str, Any],
+    *,
+    days: int = 220,
+) -> tuple[list[float], list[float]]:
+    key = settings["key"]
+    vol_vals, pct_vals = _dark_pool_history_from_db(conn, key, days=days)
+    if len(vol_vals) >= 10 and len(pct_vals) >= 10:
+        return vol_vals, pct_vals
+
     from src.finra_dark_pool import fetch_finra_dark_pool_both_history
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    volume_rows, pct_rows = fetch_finra_dark_pool_both_history(symbol, since=since)
-    vol_vals = [v for _d, v in volume_rows]
-    pct_vals = [v for _d, v in pct_rows]
-    return vol_vals, pct_vals
+    volume_rows, pct_rows = fetch_finra_dark_pool_both_history(
+        settings.get("symbol", "SPY"), since=since
+    )
+    return [v for _d, v in volume_rows], [v for _d, v in pct_rows]
 
 
 def check_dark_pool_alert(
@@ -156,7 +197,7 @@ def check_dark_pool_alert(
     prev, last_alert_at = _alert_row(conn, key)
     prev_aux = _prev_aux_value(conn, key)
 
-    vol_history, pct_history = _dark_pool_history(settings.get("symbol", "SPY"))
+    vol_history, pct_history = _dark_pool_history(conn, settings)
     if len(vol_history) < 10 or len(pct_history) < 10:
         return False, None
 
@@ -212,7 +253,9 @@ def check_dark_pool_alert(
         ).fetchone()
         last_val = float(alert_row["last_value"]) if alert_row and alert_row["last_value"] is not None else None
         mult = float(settings.get("emergency_escalation_multiplier", 2.0))
-        if not (tier == "emergency" and last_val is not None and volume >= last_val * mult):
+        if not emergency_escalation_allows(
+            tier=tier, value=volume, last_value=last_val, multiplier=mult
+        ):
             return False, None
 
     alert = _build_alert(
@@ -291,7 +334,9 @@ def check_etf_activity_alert(
         ).fetchone()
         last_val = float(alert_row["last_value"]) if alert_row and alert_row["last_value"] is not None else None
         mult = float(settings.get("emergency_escalation_multiplier", 2.0))
-        if not (tier == "emergency" and last_val is not None and snap.volume >= last_val * mult):
+        if not emergency_escalation_allows(
+            tier=tier, value=snap.volume, last_value=last_val, multiplier=mult
+        ):
             return False, None
 
     alert = _build_alert(

@@ -73,6 +73,29 @@ class CustomAlertTests(unittest.TestCase):
         self.assertEqual(alert.aux_value, 62.0)
         self.assertTrue(any("volume" in r.lower() for r in alert.reasons))
         self.assertTrue(any("dark pool %" in r.lower() for r in alert.reasons))
+        mock_hist.assert_called_once()
+        args, _kwargs = mock_hist.call_args
+        self.assertIs(args[0], self.conn)
+        self.assertEqual(args[1]["key"], "dark_pool_spy")
+
+    def test_dark_pool_uses_db_history_without_network(self) -> None:
+        settings = indicator_settings(self.cfg, "dark_pool_spy")
+        day = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        for i in range(30):
+            save_reading(
+                self.conn,
+                "dark_pool_spy",
+                10.0 + (i % 5),
+                day.strftime("%Y-%m-%d"),
+                aux_value=45.0 + (i % 3),
+            )
+            day += timedelta(days=1)
+
+        with patch("src.finra_dark_pool.fetch_finra_dark_pool_both_history") as mock_net:
+            ok, alert = check_dark_pool_alert(self.conn, settings, volume=25.0, pct=62.0)
+            mock_net.assert_not_called()
+        self.assertTrue(ok)
+        self.assertIsNotNone(alert)
 
     def test_etf_activity_unusual_volume(self) -> None:
         save_reading(self.conn, "crypto_etf_ibit", 30_000_000, "2026-06-24", aux_value=50e9)

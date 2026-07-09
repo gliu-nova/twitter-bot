@@ -1,33 +1,20 @@
 # Twitter Indicator Bot
 
-Monitors market and macro indicators, stores readings in SQLite, and posts to X/Twitter when **per-indicator rules** you define are triggered. A **posting engine** scores, groups, and rate-limits tweets so you get 2 high-quality posts per day (more for emergencies).
+Monitors market and macro indicators, stores readings in SQLite, and posts to X/Twitter when **per-indicator rules** you define are triggered. A **posting engine** scores, groups, and rate-limits tweets (default cap: **8** regular posts/day; emergencies bypass the cap).
 
-## Indicators (25)
+## Indicators (43)
 
-| Key | Name | Source |
-|-----|------|--------|
-| `sp500` | S&P 500 | Yahoo |
-| `nasdaq100` | NASDAQ 100 | Yahoo |
-| `vix` | VIX | Yahoo |
-| `dxy` | US Dollar Index (DXY) | Yahoo |
-| `gold` / `silver` | Gold, Silver | Yahoo |
-| `oil` | WTI Crude Oil | FRED |
-| `move` | MOVE Index | Yahoo |
-| `hy_spread` | High Yield Credit Spread | FRED |
-| `btc` / `eth` / `sol` | Bitcoin, Ethereum, Solana | Yahoo (verified vs Binance) |
-| `fear_greed` | Crypto Fear & Greed Index | alternative.me |
-| `fed_funds` | Fed Funds Rate | FRED |
-| `treasury_10y` | 10Y Treasury Yield | FRED |
-| `yield_curve` | Yield Curve (10Y − 2Y) | FRED |
-| `jobless_claims` | Initial Jobless Claims | FRED |
-| `pmi_manufacturing` | Philly Fed Manufacturing Index (ISM PMI proxy) | FRED |
-| `ism_services` | Chicago Fed Nonmfg Activity (ISM Services proxy) | FRED |
-| `unemployment` | Unemployment Rate | FRED |
-| `mortgage_30y` | 30Y Mortgage Rate | FRED |
-| `consumer_sentiment` | Consumer Sentiment | FRED |
-| `case_shiller` | Case-Shiller Home Prices | FRED |
-| `cpi_yoy` | CPI Inflation (YoY %) | FRED (computed) |
-| `m2` | M2 Money Supply | FRED |
+Configured in `config.yaml`. Core groups:
+
+| Group | Examples | Source |
+|-------|----------|--------|
+| Equities / ETFs | `sp500`, `nasdaq100`, `qqq`, bond/crypto ETFs | Yahoo |
+| Volatility / FX / commodities | `vix`, `dxy`, `gold`, `silver`, `oil`, `move`, `hy_spread` | Yahoo / FRED |
+| Crypto spot | `btc`, `eth`, `sol` | Yahoo (cross-verified vs **Kraken**) |
+| Crypto derivatives | funding, basis, exchange spread, liquidations | OKX / Hyperliquid / Kraken+Coinbase |
+| Sentiment | `fear_greed` | alternative.me |
+| Macro / rates / housing | Fed funds, treasuries, CPI, M2, Case-Shiller, etc. | FRED |
+| Dark pool | `dark_pool_spy` | FINRA Reg SHO |
 
 ## Custom rules per indicator
 
@@ -66,25 +53,25 @@ yield_curve:
 
 **Rule types:** `percent_change`, `absolute_change`, `crosses_above`, `crosses_below`, `above`, `below`
 
-**`cooldown_hours`** — per indicator; prevents repeat *alerts* for the same metric during fetch cycles.
+**`cooldown_hours`** — per indicator; prevents repeat *alerts* for the same metric during fetch cycles. Emergency escalation uses **magnitude** (`|value|` vs last alert × multiplier) so crashes and spikes can both break cooldown.
 
 ## Posting engine
 
 Alerts are **queued and batched**, not tweeted instantly.
 
-1. **Score** each alert: `(Magnitude × 40%) + (Rarity × 30%) + (Audience × 20%) + (Freshness × 10%)`
+1. **Score** each alert: `(Magnitude × 45%) + (Rarity × 30%) + (Audience × 25%)` (weights in `posting.score_weights`)
 2. **Buffer** market alerts 30 min (configurable) so BTC/ETH/SOL don't become 3 separate tweets
 3. **Macro recap** batch flushes after 4:15 PM ET
-4. **Decide**: standalone tweet if score ≥ 85 (CPI, Fed, VIX>30, yield curve, etc.) OR multi-indicator tweet when 3+ alerts share a theme
-5. **Daily cap**: max **2 regular posts/day** — emergency/black-swan posts (score ≥ 90 or emergency tier) **do not count** toward the limit
-6. **Cooldown**: same indicator not posted again within 36h unless emergency
+4. **Decide**: standalone tweet if score ≥ `high_single_threshold` (85) or `standalone_major`; multi-indicator when cluster score clears `multi_threshold`. Alerts below threshold stay queued.
+5. **Daily cap**: max **8 regular posts/day** — emergency/black-swan posts **do not count** toward the limit
+6. **Cooldown**: same indicator not posted again within 36h unless emergency escalation
 7. **Diversity**: avoids 3 crypto tweets in a row — prefers macro when possible
 
 Edit thresholds in `config.yaml` under `posting:`:
 
 ```yaml
 posting:
-  daily_post_cap: 2
+  daily_post_cap: 8
   emergency_threshold: 90
   high_single_threshold: 85
   multi_threshold: 120
@@ -97,6 +84,7 @@ Per-indicator **themes** (for grouping) live in `posting.indicator_themes`. Thre
 ```bash
 DRY_RUN=1 python run.py          # logs [DRY RUN] Would tweet:...
 python run.py --force-post       # flush queue immediately (testing)
+python -m unittest discover -s tests -v
 ```
 
 ## Charts on tweets
@@ -183,7 +171,7 @@ Do **not** commit `.env` to git.
 
 #### State persistence
 
-SQLite (`data/indicators.db`) is cached between runs so readings, cooldowns, and daily post counts survive. First run starts fresh; history builds over time.
+SQLite (`data/indicators.db`) is restored/saved via the Actions cache between runs so readings, cooldowns, and daily post counts survive. **Cache misses or eviction reset bot memory** (duplicate or missed posts possible) — treat cache-hit logs as operationally important. First run starts fresh; history builds over time. Readings older than ~400 days are pruned each run.
 
 #### Private repo note
 
@@ -205,21 +193,21 @@ launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
 
 Before saving or tweeting, each reading passes:
 
-- **API health** — pings FRED, Yahoo, CoinGecko, Fear & Greed at run start
+- **API health** — pings FRED, Yahoo, Kraken, Fear & Greed, OKX, Hyperliquid, Coinbase, FINRA at run start
 - **Type/NaN check** — rejects null, NaN, or non-numeric values
 - **Staleness** — per-indicator `max_stale_hours` (auto by source: crypto 12h, equities 48h, macro 720h)
-- **Cross-verification** — optional second source must agree within `tolerance_pct` (configured for SP500, NASDAQ, DXY, gold, BTC, ETH, SOL)
+- **Cross-verification** — optional second source must agree within `tolerance_pct` (configured for SP500, NASDAQ, DXY, gold, BTC, ETH, SOL vs Kraken, funding/basis, etc.)
 - **Market hours** — `us_equity` indicators suppress **alerts** outside 9:30–16:00 ET Mon–Fri (data still saved)
 
 ```bash
 python run.py --health   # API health only
 ```
 
-**Crypto (BTC/ETH/SOL)** uses Yahoo Finance hourly, cross-checked against Binance public API.
+**Crypto (BTC/ETH/SOL)** uses Yahoo Finance, cross-checked against **Kraken** (see `quality.verify` in config).
 
 ## Polling schedule
 
-GitHub Actions **ticks every hour** (external cron at `:31` UTC); each indicator fetches on its own tier when due (posting rules unchanged — still max 2 regular tweets/day + buffer):
+GitHub Actions **ticks every hour** (external cron at `:31` UTC); each indicator fetches on its own tier when due (posting rules unchanged — still max 8 regular tweets/day + buffer):
 
 | Tier | Indicators | Poll interval |
 |------|------------|---------------|
