@@ -1,17 +1,5 @@
 # AGENTS.md - Grok Build Instructions
 
-## Repo context
-
-This is a **Python Twitter/X market-indicator bot**:
-
-- Config-driven indicators in `config.yaml` (~43 keys)
-- SQLite state in `data/indicators.db` (readings, pending alerts, post log)
-- Optional DuckDB context via the `market-memory` package (`src/market_memory_bridge.py`)
-- Production runner: GitHub Actions (`.github/workflows/bot.yml`) + external hourly cron
-- Entry: `python run.py` → `src/main.py`
-
-There is **no** Cloudflare D1/R2 pipeline in this repository.
-
 ## Core Coding Principles
 
 ### 1. Think Before Coding
