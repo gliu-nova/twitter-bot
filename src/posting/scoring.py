@@ -28,6 +28,12 @@ def _magnitude_score(alert: AlertTrigger, settings: dict[str, Any], posting_cfg:
         # Whale ETH sizes use their own scale (default cap 2000 ETH)
         if alert.indicator == "eth_whale":
             cap = float(settings.get("emergency_alert") or 2000)
+        elif alert.indicator == "eth_gas":
+            cap = float(settings.get("crosses_above_gwei") or settings.get("emergency_alert") or 120)
+        elif alert.indicator == "eth_onchain_volume":
+            cap = float(settings.get("emergency_alert") or 4.0)
+        elif alert.indicator == "eth_trader":
+            cap = float(settings.get("emergency_alert") or 100)
         else:
             cap = float(
                 posting_cfg.get("magnitude_cap_absolute")

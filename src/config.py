@@ -58,6 +58,8 @@ def _source_quality_defaults(source: str) -> dict[str, Any]:
         return {"schedule": "us_equity", "max_stale_hours": 120}
     if source == "etf_activity":
         return {"schedule": "us_equity", "max_stale_hours": 48}
+    if source in ("etherscan", "blockscout"):
+        return {"schedule": "crypto_24_7", "max_stale_hours": 24}
     return {"schedule": "macro", "max_stale_hours": 4320}
 
 

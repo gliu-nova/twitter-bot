@@ -81,8 +81,8 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
         settings = indicator_settings(cfg, key)
         force_fetch = only is not None
 
-        # On-chain whales are handled by etherscan_bridge (not fetch_indicator)
-        if settings.get("source") == "etherscan":
+        # On-chain metrics are handled by etherscan/blockscout bridges (not fetch_indicator)
+        if settings.get("source") in ("etherscan", "blockscout"):
             continue
 
         if not is_fetch_due(conn, settings, cfg, force=force_fetch):
@@ -232,16 +232,34 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     if skipped_fetch and not only:
         print(f"Skipped {skipped_fetch} indicator(s) not due for fetch")
 
-    # On-chain ingest + whale alerts from market-memory Etherscan pipeline
+    # On-chain ingest from market-memory Etherscan + Blockscout pipelines
     try:
-        from src.etherscan_bridge import process_etherscan_for_bot
+        from src.etherscan_bridge import GAS_INDICATOR, VOLUME_INDICATOR, process_etherscan_for_bot
 
         eth_report = process_etherscan_for_bot(conn, cfg)
         n_whales = int((eth_report or {}).get("whales_queued") or 0)
         if n_whales:
             queued_keys.extend(["eth_whale"] * n_whales)
+        if int((eth_report or {}).get("gas_queued") or 0):
+            queued_keys.append(GAS_INDICATOR)
+        n_vol = int((eth_report or {}).get("volume_spikes_queued") or 0)
+        if n_vol:
+            queued_keys.extend([VOLUME_INDICATOR] * n_vol)
     except Exception as exc:
         print(f"[etherscan] bridge error: {exc}", file=sys.stderr)
+
+    try:
+        from src.blockscout_bridge import TRADER_INDICATOR, process_blockscout_for_bot
+
+        bs_report = process_blockscout_for_bot(conn, cfg)
+        n_bs_whales = int((bs_report or {}).get("whales_queued") or 0)
+        if n_bs_whales:
+            queued_keys.extend(["eth_whale"] * n_bs_whales)
+        n_traders = int((bs_report or {}).get("traders_queued") or 0)
+        if n_traders:
+            queued_keys.extend([TRADER_INDICATOR] * n_traders)
+    except Exception as exc:
+        print(f"[blockscout] bridge error: {exc}", file=sys.stderr)
 
     if queued_keys:
         names = ", ".join(queued_keys)

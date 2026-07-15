@@ -1174,6 +1174,12 @@ def _data_lines_for_etf_activity(alert: AlertTrigger, history: MoveHistory) -> l
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
     if alert.indicator == "eth_whale":
         return _data_lines_for_whale(alert)
+    if alert.indicator == "eth_gas":
+        return _data_lines_for_gas(alert, history)
+    if alert.indicator == "eth_onchain_volume":
+        return _data_lines_for_volume_spike(alert)
+    if alert.indicator == "eth_trader":
+        return _data_lines_for_trader(alert)
     if alert.indicator == "dark_pool_spy":
         return _data_lines_for_dark_pool(alert)
     if alert.indicator in ETF_ACTIVITY_INDICATORS:
@@ -1224,6 +1230,12 @@ def _headline_name(alert: AlertTrigger, *, major: bool, history: MoveHistory | N
     history = history or MoveHistory()
     if alert.indicator == "eth_whale":
         return _whale_headline(alert)
+    if alert.indicator == "eth_gas":
+        return _gas_headline(alert, history)
+    if alert.indicator == "eth_onchain_volume":
+        return _volume_spike_headline(alert)
+    if alert.indicator == "eth_trader":
+        return _trader_headline(alert)
     if alert.indicator.endswith("_liquidations"):
         return _liquidation_headline(alert, history)
 
@@ -1949,6 +1961,157 @@ def _template_whale(
     )
 
 
+def _gas_headline(alert: AlertTrigger, history: MoveHistory) -> str:
+    direction = "up" if alert.prev_value is not None and alert.value > alert.prev_value else "down"
+    pct = abs(history.pct_change or alert.magnitude_pct)
+    return f"ETH gas spiked {direction}: {alert.value:.1f} gwei ({pct:.0f}%)"
+
+
+def _data_lines_for_gas(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    lines = [f"Fast gas: {alert.value:.1f} gwei"]
+    if alert.prev_value is not None:
+        lines.append(f"Prior: {alert.prev_value:.1f} gwei")
+    pct = abs(history.pct_change or alert.magnitude_pct)
+    if pct > 0:
+        lines.append(f"Move: {pct:.1f}%")
+    return lines
+
+
+def _gas_takeaway(alert: AlertTrigger) -> str:
+    if alert.alert_tier == "emergency":
+        return "Network fees jumped sharply — on-chain activity may be congested."
+    if alert.alert_tier == "major":
+        return "Higher gas can squeeze DeFi users and slow settlement."
+    return "Gas moved enough to matter for on-chain costs."
+
+
+def _template_gas(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    emoji = "⛽ " if alert.alert_tier in ("major", "emergency") or is_emergency else ""
+    return _assemble_tweet(
+        headline=f"{emoji}{_gas_headline(alert, history)}".strip(),
+        data_lines=_data_lines_for_gas(alert, history),
+        context=None,
+        takeaway=_gas_takeaway(alert),
+    )
+
+
+def _volume_meta(alert: AlertTrigger) -> dict[str, str]:
+    from src.etherscan_bridge import VOLUME_REASON_PREFIX
+
+    meta: dict[str, str] = {}
+    for reason in alert.reasons:
+        if not reason.startswith(VOLUME_REASON_PREFIX):
+            continue
+        body = reason[len(VOLUME_REASON_PREFIX) :]
+        key, _, val = body.partition(":")
+        if key:
+            meta[key] = val
+    return meta
+
+
+def _volume_spike_headline(alert: AlertTrigger) -> str:
+    meta = _volume_meta(alert)
+    label = meta.get("label")
+    who = f" ({label})" if label else ""
+    return f"On-chain volume spike{who}: z={alert.value:.1f}"
+
+
+def _data_lines_for_volume_spike(alert: AlertTrigger) -> list[str]:
+    meta = _volume_meta(alert)
+    lines = [f"Z-score: {alert.value:.1f}"]
+    if meta.get("volume_eth"):
+        lines.append(f"Hourly volume: {float(meta['volume_eth']):.2f} ETH")
+    if meta.get("tx_count"):
+        lines.append(f"Tx count: {meta['tx_count']}")
+    addr = meta.get("address")
+    if addr:
+        lines.append(f"Address: {_short_addr(addr)}")
+    return lines
+
+
+def _volume_spike_takeaway(alert: AlertTrigger) -> str:
+    if alert.alert_tier == "emergency":
+        return "Unusually heavy flow — watch for follow-on volatility."
+    return "Statistical outlier in hourly ETH transfer volume."
+
+
+def _template_volume_spike(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    emoji = "📈 " if alert.alert_tier in ("major", "emergency") or is_emergency else ""
+    return _assemble_tweet(
+        headline=f"{emoji}{_volume_spike_headline(alert)}".strip(),
+        data_lines=_data_lines_for_volume_spike(alert),
+        context=None,
+        takeaway=_volume_spike_takeaway(alert),
+    )
+
+
+def _trader_meta(alert: AlertTrigger) -> dict[str, str]:
+    from src.blockscout_bridge import TRADER_REASON_PREFIX
+
+    meta: dict[str, str] = {}
+    for reason in alert.reasons:
+        if not reason.startswith(TRADER_REASON_PREFIX):
+            continue
+        body = reason[len(TRADER_REASON_PREFIX) :]
+        key, _, val = body.partition(":")
+        if key:
+            meta[key] = val
+    return meta
+
+
+def _trader_headline(alert: AlertTrigger) -> str:
+    meta = _trader_meta(alert)
+    label = meta.get("label")
+    who = f" ({label})" if label else ""
+    chain = meta.get("chain") or "ethereum"
+    return f"High-EV trader{who} on {chain}: score {alert.value:.0f}/100"
+
+
+def _data_lines_for_trader(alert: AlertTrigger) -> list[str]:
+    meta = _trader_meta(alert)
+    lines = [f"Composite score: {alert.value:.1f}/100"]
+    addr = meta.get("address")
+    if addr:
+        lines.append(f"Address: {_short_addr(addr)}")
+    if meta.get("tx_count"):
+        lines.append(f"Recent txs ingested: {meta['tx_count']}")
+    return lines
+
+
+def _trader_takeaway(alert: AlertTrigger) -> str:
+    if alert.alert_tier == "emergency":
+        return "Standout on-chain account — unusually high activity and flow quality."
+    return "Worth monitoring for copy-trade or liquidity signals."
+
+
+def _template_trader(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    emoji = "🎯 " if alert.alert_tier in ("major", "emergency") or is_emergency else ""
+    return _assemble_tweet(
+        headline=f"{emoji}{_trader_headline(alert)}".strip(),
+        data_lines=_data_lines_for_trader(alert),
+        context=None,
+        takeaway=_trader_takeaway(alert),
+    )
+
+
 def _pick_single_template(
     alert: AlertTrigger,
     history: MoveHistory,
@@ -1958,6 +2121,12 @@ def _pick_single_template(
 ) -> str:
     if alert.indicator == "eth_whale":
         return _template_whale(alert, history, posting_cfg, is_emergency=is_emergency)
+    if alert.indicator == "eth_gas":
+        return _template_gas(alert, history, posting_cfg, is_emergency=is_emergency)
+    if alert.indicator == "eth_onchain_volume":
+        return _template_volume_spike(alert, history, posting_cfg, is_emergency=is_emergency)
+    if alert.indicator == "eth_trader":
+        return _template_trader(alert, history, posting_cfg, is_emergency=is_emergency)
 
     if alert.indicator.endswith("_liquidations"):
         return _template_liquidation(alert, history, posting_cfg, is_emergency=is_emergency)
@@ -2088,8 +2257,8 @@ def should_attach_chart(
     is_emergency: bool,
 ) -> bool:
     """Default: attach a chart (target 80–100% of posts)."""
-    if alert.indicator == "eth_whale":
-        return False  # on-chain whales are text + explorer link
+    if alert.indicator in ("eth_whale", "eth_gas", "eth_onchain_volume", "eth_trader"):
+        return False  # on-chain alerts are text + links
     return not is_text_only_alert(alert, history, posting_cfg, is_emergency=is_emergency)
 
 

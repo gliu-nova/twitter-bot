@@ -26,6 +26,8 @@ etherscan:
   enabled: true
   ingest_on_poll: true
   post_whales: true
+  post_gas: true              # fast gas gwei spikes from gas oracle snapshots
+  post_volume_spikes: true    # hourly volume z-score outliers on watchlist
   mode: recent
   # db_path: ../market-memory/data/etherscan.db
   watchlist_path: data/etherscan_watchlist.yaml
@@ -33,7 +35,26 @@ etherscan:
   major_eth: 500
   emergency_eth: 2000
   max_whales_per_run: 3
+  volume_spike_zscore: 2.5
+  max_volume_spikes_per_run: 2
   rescan_db: false            # true = also scan SQLite for unalerted large transfers
+
+# On-chain Blockscout ingest (market-memory.blockscout → SQLite → whales + trader scores).
+# Requires BLOCKSCOUT_API_KEY and market-memory with blockscout package installed.
+blockscout:
+  enabled: true
+  ingest_on_poll: true
+  post_whales: true
+  post_traders: true
+  mode: account
+  instance: ethereum
+  # db_path: ../market-memory/data/blockscout.db
+  watchlist_path: data/etherscan_watchlist.yaml
+  default_role: monitor       # whale | trader | monitor
+  whale_threshold_eth: 100
+  trader_min_score: 75
+  max_whales_per_run: 2
+  max_traders_per_run: 1
 
 # Posting engine — scoring, grouping, daily cap, buffers.
 # Threshold rules per indicator are still edited under `indicators:` below.
@@ -137,6 +158,21 @@ posting:
       rarity: 90
       audience_relevance: 90
       standalone_major: true
+    eth_gas:
+      themes: [crypto]
+      category: crypto
+      rarity: 70
+      audience_relevance: 75
+    eth_onchain_volume:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 78
+      audience_relevance: 72
+    eth_trader:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 82
+      audience_relevance: 70
     eth_liquidations:
       themes: [crypto, risk_off]
       category: crypto
@@ -485,7 +521,7 @@ indicators:
       - type: crosses_above
         value: 5
 
-  # On-chain whale transfers (fed by etherscan_bridge, not fetch_indicator)
+  # On-chain whale transfers (etherscan + blockscout bridges, not fetch_indicator)
   eth_whale:
     name: "ETH whale transfer"
     source: etherscan
@@ -500,6 +536,46 @@ indicators:
     category: crypto
     rarity: 90
     audience_relevance: 90
+    quality:
+      schedule: crypto_24_7
+      max_stale_hours: 24
+
+  eth_gas:
+    name: "Ethereum gas (fast)"
+    source: etherscan
+    alert_mode: custom
+    alert_unit: percent
+    cooldown_hours: 4
+    normal_alert: 25
+    major_alert: 40
+    emergency_alert: 60
+    crosses_above_gwei: 80
+    quality:
+      schedule: crypto_24_7
+      max_stale_hours: 6
+
+  eth_onchain_volume:
+    name: "ETH on-chain volume spike"
+    source: etherscan
+    alert_mode: custom
+    alert_unit: absolute
+    cooldown_hours: 6
+    normal_alert: 2.5
+    major_alert: 3.0
+    emergency_alert: 4.0
+    quality:
+      schedule: crypto_24_7
+      max_stale_hours: 12
+
+  eth_trader:
+    name: "High-EV on-chain trader"
+    source: blockscout
+    alert_mode: custom
+    alert_unit: absolute
+    cooldown_hours: 24
+    normal_alert: 75
+    major_alert: 85
+    emergency_alert: 92
     quality:
       schedule: crypto_24_7
       max_stale_hours: 24

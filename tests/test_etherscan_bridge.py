@@ -9,9 +9,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.etherscan_bridge import (
+    GAS_INDICATOR,
+    VOLUME_INDICATOR,
     WHALE_INDICATOR,
+    gas_reading_to_alert,
     parse_whale_meta,
     process_etherscan_for_bot,
+    volume_spike_to_alert,
     whale_dict_to_alert,
 )
 from src.posting.compose import compose_single_tweet, should_attach_chart
@@ -147,6 +151,71 @@ class TestWhaleAlertConversion(unittest.TestCase):
         self.assertGreaterEqual(score, 85.0)
 
 
+class TestGasAndVolumeAlerts(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cfg = {
+            "defaults": {},
+            "posting": {"alert_max_age_hours": 48},
+            "indicators": {
+                "eth_gas": {
+                    "name": "Ethereum gas (fast)",
+                    "source": "etherscan",
+                    "alert_mode": "custom",
+                    "alert_unit": "percent",
+                    "normal_alert": 25,
+                    "major_alert": 40,
+                    "emergency_alert": 60,
+                    "crosses_above_gwei": 80,
+                    "themes": ["crypto"],
+                    "category": "crypto",
+                    "rarity": 70,
+                    "audience_relevance": 75,
+                    "quality": {"schedule": "crypto_24_7"},
+                },
+                "eth_onchain_volume": {
+                    "name": "ETH on-chain volume spike",
+                    "source": "etherscan",
+                    "alert_mode": "custom",
+                    "alert_unit": "absolute",
+                    "normal_alert": 2.5,
+                    "major_alert": 3.0,
+                    "emergency_alert": 4.0,
+                    "themes": ["crypto"],
+                    "category": "crypto",
+                    "rarity": 78,
+                    "audience_relevance": 72,
+                    "quality": {"schedule": "crypto_24_7"},
+                },
+            },
+            "etherscan": {"enabled": True},
+        }
+
+    def test_gas_spike_alert(self) -> None:
+        alert = gas_reading_to_alert(50.0, 30.0, cfg=self.cfg, chain_name="ethereum")
+        self.assertIsNotNone(alert)
+        assert alert is not None
+        self.assertEqual(alert.indicator, GAS_INDICATOR)
+        self.assertGreater(alert.magnitude_pct, 25)
+
+    def test_gas_no_alert_small_move(self) -> None:
+        alert = gas_reading_to_alert(31.0, 30.0, cfg=self.cfg, chain_name="ethereum")
+        self.assertIsNone(alert)
+
+    def test_volume_spike_alert(self) -> None:
+        spike = {
+            "bucket_start": 1700000000,
+            "volume_eth": 12.5,
+            "tx_count": 18,
+            "zscore": 3.2,
+            "mean_volume": 2.0,
+            "chain_name": "ethereum",
+        }
+        alert = volume_spike_to_alert(spike, cfg=self.cfg, address="0xabc", label="vitalik")
+        self.assertEqual(alert.indicator, VOLUME_INDICATOR)
+        self.assertEqual(alert.value, 3.2)
+        self.assertEqual(alert.alert_tier, "major")
+
+
 class TestProcessEtherscanForBot(unittest.TestCase):
     def test_queues_whales_from_ingest(self) -> None:
         cfg = {
@@ -172,10 +241,21 @@ class TestProcessEtherscanForBot(unittest.TestCase):
                     "quality": {"schedule": "crypto_24_7"},
                 }
             },
-            "etherscan": {"enabled": True, "max_whales_per_run": 2},
+            "etherscan": {"enabled": True, "max_whales_per_run": 2, "post_gas": False, "post_volume_spikes": False},
         }
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE readings (
+                indicator TEXT NOT NULL,
+                value REAL NOT NULL,
+                observed_at TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY (indicator, recorded_at)
+            );
+            """
+        )
         conn.execute(
             """
             CREATE TABLE pending_alerts (
