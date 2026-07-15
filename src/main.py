@@ -306,6 +306,7 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             emergency_posts_last_24h=emergency_posts_last_24h(conn),
             skipped_indicators=len(skipped_indicators),
             trigger=os.environ.get("BOT_TRIGGER_SOURCE", "local"),
+            conn=conn,
         )
     except Exception as exc:
         print(f"[ops-hub] heartbeat error: {exc}", file=sys.stderr)

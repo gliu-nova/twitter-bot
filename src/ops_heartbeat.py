@@ -8,6 +8,9 @@ from typing import Any
 
 import requests
 
+if False:  # pragma: no cover - type checking only
+    import sqlite3
+
 
 def push_ops_heartbeat(
     *,
@@ -19,6 +22,7 @@ def push_ops_heartbeat(
     emergency_posts_last_24h: int,
     skipped_indicators: int,
     trigger: str = "unknown",
+    conn: "sqlite3.Connection | None" = None,
 ) -> None:
     base = os.environ.get("OPS_HUB_URL", "").strip().rstrip("/")
     if not base:
@@ -40,6 +44,22 @@ def push_ops_heartbeat(
             }
         )
 
+    details: dict[str, Any] = {
+        "trigger": trigger,
+        "api_health": health,
+        "posted_tweets": posted_tweets,
+        "posts_today": posts_today,
+        "daily_post_cap": daily_post_cap,
+        "emergency_posts_last_24h": emergency_posts_last_24h,
+        "skipped_indicators": skipped_indicators,
+        "market_memory": mm_summary,
+    }
+    if conn is not None:
+        from src.db import latest_indicators_snapshot, recent_posts
+
+        details["recent_posts"] = recent_posts(conn, limit=10)
+        details["latest_indicators"] = latest_indicators_snapshot(conn)
+
     payload = {
         "service_id": "twitter-bot",
         "status": status,
@@ -50,16 +70,7 @@ def push_ops_heartbeat(
             f"run_posts={posted_tweets}, skipped_indicators={skipped_indicators}, "
             f"apis_unhealthy={len(bad_apis)}"
         ),
-        "details": {
-            "trigger": trigger,
-            "api_health": health,
-            "posted_tweets": posted_tweets,
-            "posts_today": posts_today,
-            "daily_post_cap": daily_post_cap,
-            "emergency_posts_last_24h": emergency_posts_last_24h,
-            "skipped_indicators": skipped_indicators,
-            "market_memory": mm_summary,
-        },
+        "details": details,
         "links": {
             "actions": "https://github.com/gliu-nova/twitter-bot/actions",
         },

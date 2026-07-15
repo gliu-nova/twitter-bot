@@ -359,6 +359,59 @@ def daily_readings_since(
     return sorted(by_day.items())
 
 
+DASHBOARD_INDICATORS = (
+    "btc",
+    "eth",
+    "sp500",
+    "vix",
+    "fear_greed",
+    "treasury_10y",
+    "btc_liquidations",
+)
+
+
+def recent_posts(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict[str, object]]:
+    rows = conn.execute(
+        """SELECT posted_at, tweet_type, text, indicators, is_emergency, score
+           FROM post_log ORDER BY posted_at DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    out: list[dict[str, object]] = []
+    for row in rows:
+        indicators = [part for part in str(row["indicators"]).split(",") if part]
+        out.append(
+            {
+                "posted_at": row["posted_at"],
+                "tweet_type": row["tweet_type"],
+                "text": row["text"],
+                "indicators": indicators,
+                "is_emergency": bool(row["is_emergency"]),
+                "score": float(row["score"]),
+            }
+        )
+    return out
+
+
+def latest_indicators_snapshot(
+    conn: sqlite3.Connection,
+    keys: tuple[str, ...] = DASHBOARD_INDICATORS,
+) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for key in keys:
+        row = last_reading(conn, key)
+        if not row:
+            continue
+        out.append(
+            {
+                "key": key,
+                "value": float(row["value"]),
+                "observed_at": row["observed_at"],
+                "recorded_at": row["recorded_at"],
+            }
+        )
+    return out
+
+
 def hours_since_indicator_post(conn: sqlite3.Connection, indicator: str) -> float | None:
     # Match exact comma-separated tokens to avoid substring collisions
     # (e.g. "btc" must not match "btc_funding").
