@@ -15,6 +15,38 @@ Configured in `config.yaml`. Core groups:
 | Sentiment | `fear_greed` | alternative.me |
 | Macro / rates / housing | Fed funds, treasuries, CPI, M2, Case-Shiller, etc. | FRED |
 | Dark pool | `dark_pool_spy` | FINRA Reg SHO |
+| On-chain whales | `eth_whale` | Etherscan via **market-memory** |
+
+## On-chain whales (market-memory Etherscan)
+
+Each bot poll can ingest watched addresses through `market_memory.etherscan` and queue **whale transfer** alerts into the normal posting engine.
+
+```bash
+# 1. Install market-memory with the etherscan package (sibling checkout recommended)
+pip install -e ../market-memory
+
+# 2. Set API key in twitter-bot/.env
+ETHERSCAN_API_KEY=your_key
+
+# 3. Edit watched addresses
+#    data/etherscan_watchlist.yaml
+
+# 4. Run the bot as usual (DRY_RUN=1 to print tweets)
+python run.py
+```
+
+Config (`config.yaml` → `etherscan:`):
+
+| Key | Meaning |
+|-----|---------|
+| `enabled` | Master switch |
+| `ingest_on_poll` | Call Etherscan each run |
+| `post_whales` | Enqueue `eth_whale` alerts |
+| `watchlist_path` | YAML/JSON/TXT address list |
+| `whale_threshold_eth` | Minimum size (default 100) |
+| `major_eth` / `emergency_eth` | Tier cutoffs for scoring / daily-cap bypass |
+
+Flow: **watchlist → Etherscan ingest → SQLite (`etherscan.db`) → whale hook → `pending_alerts` → compose (`🐋` tweet + explorer link)**.
 
 ## Custom rules per indicator
 

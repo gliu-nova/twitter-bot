@@ -81,6 +81,10 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
         settings = indicator_settings(cfg, key)
         force_fetch = only is not None
 
+        # On-chain whales are handled by etherscan_bridge (not fetch_indicator)
+        if settings.get("source") == "etherscan":
+            continue
+
         if not is_fetch_due(conn, settings, cfg, force=force_fetch):
             skipped_fetch += 1
             continue
@@ -227,6 +231,17 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
 
     if skipped_fetch and not only:
         print(f"Skipped {skipped_fetch} indicator(s) not due for fetch")
+
+    # On-chain ingest + whale alerts from market-memory Etherscan pipeline
+    try:
+        from src.etherscan_bridge import process_etherscan_for_bot
+
+        eth_report = process_etherscan_for_bot(conn, cfg)
+        n_whales = int((eth_report or {}).get("whales_queued") or 0)
+        if n_whales:
+            queued_keys.extend(["eth_whale"] * n_whales)
+    except Exception as exc:
+        print(f"[etherscan] bridge error: {exc}", file=sys.stderr)
 
     if queued_keys:
         names = ", ".join(queued_keys)

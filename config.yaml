@@ -19,6 +19,22 @@ market_memory:
   sync_interval_minutes: 0    # 0 = sync every run (hourly GitHub Actions)
   seed_verified_liquidations: false  # set true once if DB has no historical liquidation episodes
 
+# On-chain Etherscan ingest (market-memory.etherscan → SQLite → eth_whale alerts).
+# Requires ETHERSCAN_API_KEY and market-memory with the etherscan package installed.
+# Defaults resolve to sibling ../market-memory/data when paths are omitted.
+etherscan:
+  enabled: true
+  ingest_on_poll: true
+  post_whales: true
+  mode: recent
+  # db_path: ../market-memory/data/etherscan.db
+  watchlist_path: data/etherscan_watchlist.yaml
+  whale_threshold_eth: 100
+  major_eth: 500
+  emergency_eth: 2000
+  max_whales_per_run: 3
+  rescan_db: false            # true = also scan SQLite for unalerted large transfers
+
 # Posting engine — scoring, grouping, daily cap, buffers.
 # Threshold rules per indicator are still edited under `indicators:` below.
 posting:
@@ -114,6 +130,12 @@ posting:
       category: crypto
       rarity: 85
       audience_relevance: 85
+      standalone_major: true
+    eth_whale:
+      themes: [crypto, risk_on]
+      category: crypto
+      rarity: 90
+      audience_relevance: 90
       standalone_major: true
     eth_liquidations:
       themes: [crypto, risk_off]
@@ -462,6 +484,25 @@ indicators:
     rules:
       - type: crosses_above
         value: 5
+
+  # On-chain whale transfers (fed by etherscan_bridge, not fetch_indicator)
+  eth_whale:
+    name: "ETH whale transfer"
+    source: etherscan
+    alert_mode: custom
+    alert_unit: absolute
+    cooldown_hours: 2
+    normal_alert: 100
+    major_alert: 500
+    emergency_alert: 2000
+    standalone_major: true
+    themes: [crypto, risk_on]
+    category: crypto
+    rarity: 90
+    audience_relevance: 90
+    quality:
+      schedule: crypto_24_7
+      max_stale_hours: 24
 
   btc:
     name: "Bitcoin"

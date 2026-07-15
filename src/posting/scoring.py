@@ -25,11 +25,15 @@ def _magnitude_score(alert: AlertTrigger, settings: dict[str, Any], posting_cfg:
 
     if unit == "absolute":
         move = alert.magnitude_abs or abs(alert.value - (alert.prev_value or alert.value))
-        cap = float(
-            posting_cfg.get("magnitude_cap_absolute")
-            or settings.get("emergency_alert")
-            or 1.0
-        )
+        # Whale ETH sizes use their own scale (default cap 2000 ETH)
+        if alert.indicator == "eth_whale":
+            cap = float(settings.get("emergency_alert") or 2000)
+        else:
+            cap = float(
+                posting_cfg.get("magnitude_cap_absolute")
+                or settings.get("emergency_alert")
+                or 1.0
+            )
         normalized = min(move / cap, 1.0) * 100
     else:
         pct = alert.magnitude_pct or _pct_change(alert.prev_value, alert.value)

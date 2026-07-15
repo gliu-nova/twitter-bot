@@ -69,6 +69,7 @@ CATEGORY_GROUPS: dict[str, set[str]] = {
         "btc_liquidations",
         "eth_liquidations",
         "sol_liquidations",
+        "eth_whale",
         "crypto_etf_ibit",
         "crypto_etf_fbtc",
     },

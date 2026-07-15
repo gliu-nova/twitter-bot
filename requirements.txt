@@ -5,4 +5,8 @@ PyYAML>=6.0.0
 tweepy>=4.14.0
 matplotlib>=3.8.0
 httpx>=0.27.0
+# On-chain whales need a market-memory build that includes market_memory.etherscan.
+# Local (recommended while developing both repos):
+#   pip install -e ../market-memory
+# Pinned remote (update after pushing etherscan to market-memory):
 market-memory @ git+https://github.com/gliu-nova/market-memory.git@7431e1bb08a6f5a58e1684eefb9f3ea4f6199e4c

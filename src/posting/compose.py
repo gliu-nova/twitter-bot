@@ -1172,12 +1172,15 @@ def _data_lines_for_etf_activity(alert: AlertTrigger, history: MoveHistory) -> l
 
 
 def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str]:
+    if alert.indicator == "eth_whale":
+        return _data_lines_for_whale(alert)
     if alert.indicator == "dark_pool_spy":
         return _data_lines_for_dark_pool(alert)
     if alert.indicator in ETF_ACTIVITY_INDICATORS:
         return _data_lines_for_etf_activity(alert, history)
     if alert.indicator.endswith("_liquidations"):
         return _data_lines_for_liquidation(alert, history)
+
     if alert.indicator.endswith("_funding"):
         return _data_lines_for_funding(alert, history)
     if alert.indicator.endswith("_basis"):
@@ -1219,8 +1222,11 @@ def _data_lines_for_alert(alert: AlertTrigger, history: MoveHistory) -> list[str
 
 def _headline_name(alert: AlertTrigger, *, major: bool, history: MoveHistory | None = None) -> str:
     history = history or MoveHistory()
+    if alert.indicator == "eth_whale":
+        return _whale_headline(alert)
     if alert.indicator.endswith("_liquidations"):
         return _liquidation_headline(alert, history)
+
     if alert.indicator.endswith("_funding"):
         return _funding_headline(alert, history)
     if alert.indicator.endswith("_basis"):
@@ -1513,6 +1519,12 @@ def _display_name(alert: AlertTrigger) -> str:
 
 def _format_value(alert: AlertTrigger) -> str:
     v = alert.value
+    if alert.indicator == "eth_whale":
+        if v >= 1000:
+            return f"{v:,.0f} ETH"
+        if v >= 100:
+            return f"{v:,.1f} ETH"
+        return f"{v:.2f} ETH"
     if alert.indicator.endswith("_funding"):
         return f"{v * 100:.4f}%"
     if alert.indicator.endswith(("_basis", "_exchange_spread")):
@@ -1878,6 +1890,65 @@ def _template_major_move(
     )
 
 
+def _whale_meta(alert: AlertTrigger) -> dict[str, str]:
+    from src.etherscan_bridge import parse_whale_meta
+
+    return parse_whale_meta(alert)
+
+
+def _short_addr(addr: str, n: int = 4) -> str:
+    if not addr or len(addr) < 12:
+        return addr or "?"
+    return f"{addr[: n + 2]}…{addr[-n:]}"
+
+
+def _whale_headline(alert: AlertTrigger) -> str:
+    meta = _whale_meta(alert)
+    chain = meta.get("chain") or "ethereum"
+    label = meta.get("label")
+    who = f" ({label})" if label else ""
+    return f"Whale transfer{who} on {chain}: {_format_value(alert)}"
+
+
+def _data_lines_for_whale(alert: AlertTrigger) -> list[str]:
+    meta = _whale_meta(alert)
+    lines = [
+        f"Size: {_format_value(alert)}",
+        f"From {_short_addr(meta.get('from', ''))} → {_short_addr(meta.get('to', ''))}",
+    ]
+    watched = meta.get("watched")
+    if watched:
+        lines.append(f"Watched: {_short_addr(watched)}")
+    url = meta.get("url")
+    if url:
+        lines.append(url)
+    return lines
+
+
+def _whale_takeaway(alert: AlertTrigger) -> str:
+    if alert.alert_tier == "emergency":
+        return "Very large on-chain move — worth watching for liquidity impact."
+    if alert.alert_tier == "major":
+        return "Sizeable transfer across a watched address."
+    return "Large transfer detected on a watched wallet."
+
+
+def _template_whale(
+    alert: AlertTrigger,
+    history: MoveHistory,
+    posting_cfg: dict[str, Any],
+    *,
+    is_emergency: bool,
+) -> str:
+    emoji = "🐋 " if alert.alert_tier in ("major", "emergency") or is_emergency else ""
+    return _assemble_tweet(
+        headline=f"{emoji}{_whale_headline(alert)}".strip(),
+        data_lines=_data_lines_for_whale(alert),
+        context=None,
+        takeaway=_whale_takeaway(alert),
+    )
+
+
 def _pick_single_template(
     alert: AlertTrigger,
     history: MoveHistory,
@@ -1885,6 +1956,9 @@ def _pick_single_template(
     *,
     is_emergency: bool,
 ) -> str:
+    if alert.indicator == "eth_whale":
+        return _template_whale(alert, history, posting_cfg, is_emergency=is_emergency)
+
     if alert.indicator.endswith("_liquidations"):
         return _template_liquidation(alert, history, posting_cfg, is_emergency=is_emergency)
 
@@ -2014,6 +2088,8 @@ def should_attach_chart(
     is_emergency: bool,
 ) -> bool:
     """Default: attach a chart (target 80–100% of posts)."""
+    if alert.indicator == "eth_whale":
+        return False  # on-chain whales are text + explorer link
     return not is_text_only_alert(alert, history, posting_cfg, is_emergency=is_emergency)
 
 
