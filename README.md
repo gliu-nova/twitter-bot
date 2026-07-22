@@ -200,6 +200,7 @@ Do **not** commit `.env` to git.
 - **Actions** tab → latest run should be green
 - Expand **Run bot** step to see indicator fetches
 - When a threshold fires, the bot tweets from your account (`DRY_RUN=0` in the workflow)
+- Hourly `external-cron` ticks still run unit tests, but a test failure does **not** skip the bot (manual **Run workflow** still fails the job if tests fail)
 
 #### State persistence
 

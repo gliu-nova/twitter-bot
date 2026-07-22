@@ -68,7 +68,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Advisory on hourly production ticks: a flaky/time-dependent test must not
+      # skip Validate + Run bot (that silenced ops heartbeats for ~15h).
+      # Manual dispatches still fail the job when tests fail.
       - name: Unit tests
+        id: unit-tests
+        continue-on-error: ${{ github.event.inputs.source == 'external-cron' }}
         run: python -m unittest discover -s tests -v
 
       - name: Validate secrets and APIs

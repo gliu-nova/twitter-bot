@@ -123,7 +123,8 @@ class ChartQualityTests(unittest.TestCase):
             conn.execute(
                 "CREATE TABLE readings (indicator TEXT, value REAL, observed_at TEXT, recorded_at TEXT)"
             )
-            base = datetime(2026, 6, 20, tzinfo=timezone.utc)
+            # Relative timestamps so the months=1 history window never ages out.
+            base = datetime.now(timezone.utc) - timedelta(hours=24)
             values = [0.00008, 0.00005, 0.00002, -0.00001, -0.00004]
             for i, val in enumerate(values):
                 ts = (base + timedelta(hours=6 * i)).strftime("%Y-%m-%d %H:%M:%S")
