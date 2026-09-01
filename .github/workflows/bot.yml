@@ -109,7 +109,11 @@ jobs:
           readings = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
           posts = conn.execute("SELECT COUNT(*) FROM post_log").fetchone()[0]
           pending = conn.execute("SELECT COUNT(*) FROM pending_alerts WHERE processed = 0").fetchone()[0]
-          print(f"readings={readings} posts={posts} pending_alerts={pending}")
+          try:
+              ledger = conn.execute("SELECT COUNT(*) FROM outcome_ledger").fetchone()[0]
+          except sqlite3.OperationalError:
+              ledger = "n/a"
+          print(f"readings={readings} posts={posts} pending_alerts={pending} outcome_ledger={ledger}")
           PY
           else
             echo "indicators.db missing"

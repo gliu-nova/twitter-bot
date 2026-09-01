@@ -211,6 +211,50 @@ def _event_tags(indicator: str, mapping: dict[str, Any]) -> list[str]:
     return ["macro"]
 
 
+def first_confirming_peer_event(
+    cfg: dict[str, Any],
+    *,
+    peers: list[tuple[str, int]],
+    since: datetime,
+    until: datetime,
+) -> tuple[str, datetime] | None:
+    """Earliest market-memory event on a related series in the required direction."""
+    if not memory_enabled(cfg) or not peers:
+        return None
+    db = EventDB(data_dir=str(_resolve_data_dir(cfg)))
+    best: tuple[datetime, str] | None = None
+    try:
+        for peer, required_dir in peers:
+            mapping = INDICATOR_MEMORY_MAP.get(peer)
+            if not mapping:
+                continue
+            want = "up" if required_dir > 0 else "down"
+            events = db.get_events(
+                event_type=mapping["event_type"],
+                asset=mapping.get("asset"),
+                indicator_type=mapping.get("indicator_type"),
+                since=since,
+                until=until,
+                limit=50,
+            )
+            for event in events:
+                direction = event.direction
+                if direction != want and not (required_dir > 0 and direction == "spike"):
+                    continue
+                ts = event.timestamp
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts <= since:
+                    continue
+                if best is None or ts < best[0]:
+                    best = (ts, peer)
+    finally:
+        db.close()
+    if best is None:
+        return None
+    return best[1], best[0]
+
+
 def record_posted_alert(alert: Any, cfg: dict[str, Any]) -> None:
     """Persist a posted alert as a market-memory event for future context."""
     if not memory_enabled(cfg):

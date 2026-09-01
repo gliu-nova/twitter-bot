@@ -271,6 +271,14 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
     if posted:
         print(f"Posted {posted} tweet(s)")
 
+    ledger_stats = None
+    try:
+        from src.outcome_ledger import process_outcome_ledger
+
+        ledger_stats = process_outcome_ledger(conn, cfg)
+    except Exception as exc:
+        print(f"[outcome-ledger] skipped: {exc}", file=sys.stderr)
+
     try:
         from src.db import prune_old_readings
 
@@ -307,6 +315,7 @@ def run(only: str | None = None, *, health_only: bool = False, force_post: bool 
             skipped_indicators=len(skipped_indicators),
             trigger=os.environ.get("BOT_TRIGGER_SOURCE", "local"),
             conn=conn,
+            outcome_ledger=ledger_stats.to_dict() if ledger_stats is not None else None,
         )
     except Exception as exc:
         print(f"[ops-hub] heartbeat error: {exc}", file=sys.stderr)
@@ -344,6 +353,11 @@ def main() -> None:
         action="store_true",
         help="Post one test tweet to verify live posting (uses DRY_RUN from .env)",
     )
+    parser.add_argument(
+        "--outcome-ledger",
+        action="store_true",
+        help="Resolve open outcomes and rewrite data/outcome_ledger.html",
+    )
     args = parser.parse_args()
     if args.validate:
         load_dotenv(ROOT / ".env")
@@ -356,6 +370,22 @@ def main() -> None:
 
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         post_tweet(f"Market bot connectivity test — automated posting check ({ts})."[:280])
+        raise SystemExit(0)
+    if args.outcome_ledger:
+        load_dotenv(ROOT / ".env")
+        from src.db import connect as db_connect
+        from src.outcome_ledger import process_outcome_ledger
+
+        cfg = load_config()
+        conn = db_connect()
+        try:
+            stats = process_outcome_ledger(conn, cfg)
+            print(
+                f"alerts_fired={stats.alerts_fired} resolved={stats.resolved_pct} "
+                f"false_alarm={stats.false_alarm_pct} median_ttc={stats.median_hours_to_confirm}"
+            )
+        finally:
+            conn.close()
         raise SystemExit(0)
     raise SystemExit(run(args.indicator, health_only=args.health, force_post=args.force_post))
 

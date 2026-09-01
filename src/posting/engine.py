@@ -374,6 +374,12 @@ def enqueue_alert(
         alert_tier=alert.alert_tier,
     )
     alert.db_id = alert_id
+    try:
+        from src.outcome_ledger import register_fired_alert
+
+        register_fired_alert(conn, alert)
+    except Exception as exc:
+        print(f"[outcome-ledger] register skipped: {exc}")
     print(f"[queue] queued for posting decision — {_alert_trigger_summary(alert)}")
     print(f"[queue]   why queued: {queue_reason}")
     return alert_id
@@ -683,6 +689,12 @@ def process_posting_queue(
                 record_posted_alert(a, cfg)
             except Exception as exc:
                 print(f"[posting] market-memory record skipped: {exc}")
+        try:
+            from src.outcome_ledger import mark_ledger_posted
+
+            mark_ledger_posted(conn, [a.db_id for a in decision.alerts if a.db_id])
+        except Exception as exc:
+            print(f"[outcome-ledger] posted mark skipped: {exc}")
 
         # Mark only alerts included in the tweet; leave siblings queued for later flush
         mark_alerts_processed(conn, [a.db_id for a in decision.alerts if a.db_id])

@@ -113,6 +113,29 @@ Reasons:
 + Treasury volatility elevated
 ```
 
+## Outcome ledger
+
+Every fired alert (queued, not only posted) is written to an **outcome ledger**. On later runs the bot records what happened next:
+
+- **4h / 24h / 5d** percent move on the **same series**
+- whether a **related series confirmed** it (e.g. VIX up after SPX down), using local readings first and **market-memory** events as fallback
+- **time-to-confirmation** in hours
+
+Headline stats use the 24h window (5d for macro). A move in the expected direction is a hit; flat or opposite is a false alarm.
+
+Each run rewrites a simple page and JSON:
+
+```
+data/outcome_ledger.html
+data/outcome_ledger.json
+```
+
+The same summary is pushed to ops-hub and shown on the public Twitter bot dashboard (`/bots/twitter`). Regenerate without fetching:
+
+```bash
+python run.py --outcome-ledger
+```
+
 Edit thresholds in `config.yaml` under `posting:`:
 
 ```yaml

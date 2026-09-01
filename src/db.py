@@ -55,6 +55,29 @@ def connect() -> sqlite3.Connection:
             primary_category TEXT NOT NULL,
             themes TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS outcome_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pending_alert_id INTEGER UNIQUE,
+            indicator TEXT NOT NULL,
+            fired_at TEXT NOT NULL,
+            value REAL NOT NULL,
+            prev_value REAL,
+            expected_direction INTEGER NOT NULL,
+            alert_tier TEXT NOT NULL DEFAULT 'normal',
+            is_macro INTEGER NOT NULL DEFAULT 0,
+            posted INTEGER NOT NULL DEFAULT 0,
+            move_4h_pct REAL,
+            move_24h_pct REAL,
+            move_5d_pct REAL,
+            resolved_4h INTEGER,
+            resolved_24h INTEGER,
+            resolved_5d INTEGER,
+            confirmed INTEGER NOT NULL DEFAULT 0,
+            confirmed_by TEXT,
+            confirmed_at TEXT,
+            hours_to_confirm REAL,
+            UNIQUE(indicator, fired_at)
+        );
     """)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(pending_alerts)")}
     if "alert_tier" not in cols:

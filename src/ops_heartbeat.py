@@ -23,6 +23,7 @@ def push_ops_heartbeat(
     skipped_indicators: int,
     trigger: str = "unknown",
     conn: "sqlite3.Connection | None" = None,
+    outcome_ledger: dict[str, Any] | None = None,
 ) -> None:
     base = os.environ.get("OPS_HUB_URL", "").strip().rstrip("/")
     if not base:
@@ -59,6 +60,8 @@ def push_ops_heartbeat(
 
         details["recent_posts"] = recent_posts(conn, limit=10)
         details["latest_indicators"] = latest_indicators_snapshot(conn)
+    if outcome_ledger is not None:
+        details["outcome_ledger"] = outcome_ledger
 
     payload = {
         "service_id": "twitter-bot",
