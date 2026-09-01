@@ -13,7 +13,7 @@ def decide_tweet_type(
     if not triggered_alerts:
         return None
 
-    high_single = float(posting_cfg.get("high_single_threshold", 85))
+    high_single = float(posting_cfg.get("high_single_threshold", 75))
     multi_threshold = float(posting_cfg.get("multi_threshold", 120))
     min_cluster_size = int(posting_cfg.get("min_cluster_size", 3))
     emergency_threshold = float(posting_cfg.get("emergency_threshold", 90))

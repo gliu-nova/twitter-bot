@@ -161,5 +161,5 @@ def filter_stale_alerts(
     now: datetime | None = None,
 ) -> list[AlertTrigger]:
     now = now or datetime.now(timezone.utc)
-    max_age = timedelta(hours=float(posting_cfg.get("alert_max_age_hours", 12)))
+    max_age = timedelta(hours=float(posting_cfg.get("alert_max_age_hours", 36)))
     return [a for a in alerts if now - a.timestamp <= max_age]

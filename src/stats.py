@@ -48,6 +48,19 @@ def percentile_rank(value: float, history: list[float]) -> float | None:
     return 100.0 * sum(1 for v in history if v <= value) / len(history)
 
 
+def z_score(value: float, history: list[float]) -> float | None:
+    """Sample z-score of `value` versus `history`. None if history is too thin."""
+    if len(history) < 5:
+        return None
+    n = len(history)
+    mean = sum(history) / n
+    var = sum((x - mean) ** 2 for x in history) / (n - 1)
+    std = var ** 0.5
+    if std < 1e-15:
+        return None
+    return (value - mean) / std
+
+
 def trailing_average(values: list[float], window: int) -> float | None:
     if len(values) < window:
         return None

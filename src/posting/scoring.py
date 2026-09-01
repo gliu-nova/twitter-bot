@@ -16,7 +16,7 @@ def _pct_change(old: float | None, new: float) -> float:
 def is_fresh(alert: AlertTrigger, posting_cfg: dict[str, Any], now: datetime | None = None) -> bool:
     """Hard gate: stale alerts are rejected before scoring."""
     now = now or datetime.now(timezone.utc)
-    max_age = timedelta(hours=float(posting_cfg.get("alert_max_age_hours", 12)))
+    max_age = timedelta(hours=float(posting_cfg.get("alert_max_age_hours", 36)))
     return now - alert.timestamp <= max_age
 
 

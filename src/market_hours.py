@@ -57,14 +57,16 @@ def off_hours_equity_alert_action(
     alert: AlertTrigger,
     skip_reason: str | None,
 ) -> OffHoursAction:
-    """How to handle an alert blocked by us_equity market-hours gating."""
+    """How to handle an alert blocked by us_equity market-hours gating.
+
+    Queue for the next cash session instead of dropping. VIX major/emergency
+    (and VIX cross above 30) may still post immediately off-hours.
+    """
     if not skip_reason:
         return "post"
     schedule = (settings.get("quality") or {}).get("schedule", "macro")
     if schedule != "us_equity":
         return "post"
-    if settings.get("key") == "vix":
-        if vix_off_hours_immediate(alert):
-            return "post"
-        return "queue"
-    return "drop"
+    if settings.get("key") == "vix" and vix_off_hours_immediate(alert):
+        return "post"
+    return "queue"

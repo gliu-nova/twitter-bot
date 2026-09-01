@@ -66,7 +66,7 @@ posting:
   # Emergencies honor each indicator's cooldown_hours (24h for liquidations).
   # Same-day repost only if emergency tier AND |value| escalated by emergency_escalation_multiplier vs last post.
   emergency_threshold: 90
-  high_single_threshold: 85
+  high_single_threshold: 75
   multi_threshold: 120
   min_cluster_size: 3
   market_buffer_minutes: 30
@@ -75,7 +75,8 @@ posting:
   anytime_session_penalty: 3
   group_time_window_hours: 8
   indicator_cooldown_hours: 36
-  alert_max_age_hours: 12
+  # Macro FRED prints often arrive in the morning; 36h survives the 16:15 ET flush.
+  alert_max_age_hours: 36
   max_crypto_streak: 2
   diversity_lookback: 3
   magnitude_cap_pct: 25
@@ -200,11 +201,13 @@ posting:
       category: equities_vol
       rarity: 75
       audience_relevance: 85
+      standalone_major: true
     qqq:
       themes: [risk_on, equities]
       category: equities_vol
       rarity: 74
       audience_relevance: 84
+      standalone_major: true
     bond_etf_agg:
       themes: [risk_off, easing_conditions]
       category: rates_fx
@@ -276,6 +279,7 @@ posting:
       category: commodities
       rarity: 70
       audience_relevance: 70
+      standalone_major: true
     mortgage_30y:
       themes: [easing_conditions]
       category: housing
@@ -286,6 +290,7 @@ posting:
       category: macro_data
       rarity: 65
       audience_relevance: 65
+      standalone_major: true
     case_shiller:
       themes: [housing]
       category: housing
@@ -296,6 +301,7 @@ posting:
       category: commodities
       rarity: 60
       audience_relevance: 60
+      standalone_major: true
     silver:
       themes: [risk_on]
       category: commodities
@@ -316,11 +322,13 @@ posting:
       category: macro_data
       rarity: 70
       audience_relevance: 70
+      standalone_major: true
     unemployment:
       themes: [risk_off]
       category: macro_data
       rarity: 80
       audience_relevance: 80
+      standalone_major: true
     pmi_manufacturing:
       themes: [risk_on]
       category: macro_data
@@ -367,16 +375,16 @@ indicators:
       verify:
         source: fred
         series: SP500
-        tolerance_pct: 1.5
+        tolerance_pct: 3.0
 
   nasdaq100:
     name: "NASDAQ 100"
     source: yahoo
     symbol: "^NDX"
     cooldown_hours: 12
-    normal_alert: 3
-    major_alert: 4
-    emergency_alert: 6
+    normal_alert: 2.5
+    major_alert: 3.5
+    emergency_alert: 5.5
 
   qqq:
     name: "QQQ ETF"
@@ -387,7 +395,7 @@ indicators:
     normal_alert: 2.5
     major_alert: 3.5
     emergency_alert: 5.5
-    move_percentile: 97
+    move_percentile: 95
     move_percentile_min_days: 60
 
   bond_etf_agg:
@@ -442,7 +450,7 @@ indicators:
     normal_alert: 12
     major_alert: 20
     emergency_alert: 30
-    pct_percentile: 97
+    pct_percentile: 95
     pct_high_lookback_days: 180
     volume_avg_30d_mult: 1.35
     volume_avg_60d_mult: 1.50
@@ -492,7 +500,7 @@ indicators:
     name: "WTI Crude Oil"
     source: fred
     series: DCOILWTICO
-    normal_alert: 6
+    normal_alert: 4
     major_alert: 8
     emergency_alert: 12
 
@@ -907,7 +915,7 @@ indicators:
     source: fred
     series: ICSA
     cooldown_hours: 168
-    normal_alert: 8
+    normal_alert: 6
     major_alert: 12
     emergency_alert: 18
 

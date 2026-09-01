@@ -94,10 +94,24 @@ Alerts are **queued and batched**, not tweeted instantly.
 1. **Score** each alert: `(Magnitude × 45%) + (Rarity × 30%) + (Audience × 25%)` (weights in `posting.score_weights`)
 2. **Buffer** market alerts 30 min (configurable) so BTC/ETH/SOL don't become 3 separate tweets
 3. **Macro recap** batch flushes after 4:15 PM ET
-4. **Decide**: standalone tweet if score ≥ `high_single_threshold` (85) or `standalone_major`; multi-indicator when cluster score clears `multi_threshold`. Alerts below threshold stay queued.
+4. **Decide**: standalone tweet if score ≥ `high_single_threshold` (75) or `standalone_major`; multi-indicator when cluster score clears `multi_threshold`. Alerts below threshold stay queued.
 5. **Daily cap**: max **8 regular posts/day** — emergency/black-swan posts **do not count** toward the limit
 6. **Cooldown**: same indicator not posted again within 36h unless emergency escalation
-7. **Diversity**: avoids 3 crypto tweets in a row — prefers macro when possible
+7. **Diversity**: after 2 crypto tweets in a row, skip non-emergency crypto and post a non-crypto alternative if one qualifies. Emergencies still go out.
+8. **Off-hours equities**: US-session indicators that fire after the close are **queued** for the next 9:30–16:00 ET window (not dropped). VIX major/emergency may still post immediately.
+
+When a threshold-crossing alert is actually posted, the bot also computes an **event scorecard** from whatever of these are relevant: absolute change, rolling percentile, z-score, historical rarity, velocity, persistence, cross-asset confirmation, and data confidence. Strong reasons replace the generic context line:
+
+```
+event_score = 87 / 100
+severity = HIGH
+
+Reasons:
++ 98th percentile 1h move
++ largest move in 41 days
++ confirmed by VIX
++ Treasury volatility elevated
+```
 
 Edit thresholds in `config.yaml` under `posting:`:
 
@@ -105,10 +119,11 @@ Edit thresholds in `config.yaml` under `posting:`:
 posting:
   daily_post_cap: 8
   emergency_threshold: 90
-  high_single_threshold: 85
+  high_single_threshold: 75
   multi_threshold: 120
   market_buffer_minutes: 30
   indicator_cooldown_hours: 36
+  alert_max_age_hours: 36
 ```
 
 Per-indicator **themes** (for grouping) live in `posting.indicator_themes`. Threshold **rules** stay under each `indicators:` entry.

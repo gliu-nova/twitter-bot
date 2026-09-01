@@ -39,6 +39,7 @@ from src.posting.context_explain import (
     classify_post_skip,
     finalize_context_explain_logs,
 )
+from src.posting.event_score import build_event_scorecard, log_event_scorecard
 from src.posting.history import build_move_history
 from src.posting.decide import decide_tweet_type
 from src.posting.grouping import filter_stale_alerts
@@ -196,26 +197,26 @@ def _primary_category(alert: AlertTrigger) -> str:
     return alert.category or "other"
 
 
-def _diversity_penalty(
+def _consecutive_crypto_streak(
     conn: sqlite3.Connection,
-    decision_alerts: list[AlertTrigger],
     posting_cfg: dict[str, Any],
-) -> float:
-    """Penalize posting another crypto tweet if last 2 were crypto."""
+) -> int:
     recent = recent_tweet_categories(conn, limit=int(posting_cfg.get("diversity_lookback", 3)))
-    candidate_cat = _primary_category(decision_alerts[0])
-    if candidate_cat != "crypto":
-        return 0.0
-    crypto_streak = 0
+    streak = 0
     for cat in recent:
         if cat == "crypto":
-            crypto_streak += 1
+            streak += 1
         else:
             break
-    max_crypto_streak = int(posting_cfg.get("max_crypto_streak", 2))
-    if crypto_streak >= max_crypto_streak:
-        return 50.0
-    return 0.0
+    return streak
+
+
+def _crypto_streak_at_cap(
+    conn: sqlite3.Connection,
+    posting_cfg: dict[str, Any],
+) -> bool:
+    max_streak = int(posting_cfg.get("max_crypto_streak", 2))
+    return _consecutive_crypto_streak(conn, posting_cfg) >= max_streak
 
 
 def _alert_trigger_summary(alert: AlertTrigger) -> str:
@@ -305,7 +306,7 @@ def _log_buffered_alerts(
 def _post_threshold_for_decision(decision: TweetDecision, posting_cfg: dict[str, Any]) -> float:
     if decision.tweet_type == "multi":
         return float(posting_cfg.get("multi_threshold", 120))
-    return float(posting_cfg.get("high_single_threshold", 85))
+    return float(posting_cfg.get("high_single_threshold", 75))
 
 
 def _primary_decision_alert(decision: TweetDecision) -> AlertTrigger:
@@ -325,25 +326,15 @@ def _buffer_batch_for_alert(
     return "session"
 
 
-def _prefer_macro_alternative(
-    decisions: list[Any],
+def _prefer_non_crypto_alternative(
     all_alerts: list[AlertTrigger],
-    conn: sqlite3.Connection,
     posting_cfg: dict[str, Any],
 ) -> Any | None:
-    """If top decision is crypto-blocked, try highest macro alternative."""
-    recent = recent_tweet_categories(conn, limit=int(posting_cfg.get("diversity_lookback", 3)))
-    crypto_streak = sum(1 for c in recent[:2] if c == "crypto")
-    if crypto_streak < int(posting_cfg.get("max_crypto_streak", 2)):
+    """If crypto is streak-blocked, try the best non-crypto decision in this batch."""
+    others = [a for a in all_alerts if _primary_category(a) != "crypto"]
+    if not others:
         return None
-
-    macro_alerts = [a for a in all_alerts if _primary_category(a) == "macro"]
-    if not macro_alerts:
-        return None
-
-    from src.posting.decide import decide_tweet_type
-
-    return decide_tweet_type(macro_alerts, posting_cfg)
+    return decide_tweet_type(others, posting_cfg)
 
 
 def enqueue_alert(
@@ -438,7 +429,7 @@ def process_posting_queue(
             batch = _buffer_batch_for_alert(
                 top, session_market, anytime_market, macro_alerts,
             )
-            post_threshold = float(posting_cfg.get("high_single_threshold", 85))
+            post_threshold = float(posting_cfg.get("high_single_threshold", 75))
             primary, secondary = classify_post_skip(
                 gate="buffered",
                 score=top.score,
@@ -470,7 +461,7 @@ def process_posting_queue(
         if not alerts:
             if raw_alerts:
                 top = max(raw_alerts, key=lambda alert: alert.score)
-                post_threshold = float(posting_cfg.get("high_single_threshold", 85))
+                post_threshold = float(posting_cfg.get("high_single_threshold", 75))
                 primary, secondary = classify_post_skip(
                     gate="stale",
                     score=top.score,
@@ -496,7 +487,7 @@ def process_posting_queue(
         if not decision:
             if alerts:
                 top = max(alerts, key=lambda alert: alert.score)
-                post_threshold = float(posting_cfg.get("high_single_threshold", 85))
+                post_threshold = float(posting_cfg.get("high_single_threshold", 75))
                 primary, secondary = classify_post_skip(
                     gate="below_threshold",
                     score=top.score,
@@ -514,13 +505,35 @@ def process_posting_queue(
                 )
             continue
 
-        # Diversity: prefer macro if crypto streak too long
-        penalty = _diversity_penalty(conn, decision.alerts, posting_cfg)
-        if penalty >= 50:
-            alt = _prefer_macro_alternative([decision], alerts, conn, posting_cfg)
+        # Diversity: break crypto streaks. Prefer a non-crypto alternative in
+        # this batch; otherwise skip non-emergency crypto (keep queued).
+        if (
+            _primary_category(decision.alerts[0]) == "crypto"
+            and _crypto_streak_at_cap(conn, posting_cfg)
+        ):
+            alt = _prefer_non_crypto_alternative(alerts, posting_cfg)
             if alt:
-                print("[posting] diversity: preferring macro over crypto streak")
+                print("[posting] diversity: preferring non-crypto over crypto streak")
                 decision = alt
+            elif not decision.is_emergency:
+                print("[posting] diversity: skipping non-emergency crypto (streak cap)")
+                post_threshold = _post_threshold_for_decision(decision, posting_cfg)
+                primary, secondary = classify_post_skip(
+                    gate="diversity",
+                    score=decision.score,
+                    post_threshold=post_threshold,
+                )
+                skipped_candidates.append(
+                    SkippedPostCandidate(
+                        alert=_primary_decision_alert(decision),
+                        primary_skip_reason=primary,
+                        secondary_skip_reason=secondary,
+                        skip_detail="crypto_streak_cap",
+                        score=decision.score,
+                        post_threshold=post_threshold,
+                    ),
+                )
+                continue
 
         # Cooldown filter (keep emergency)
         filtered = [
@@ -571,6 +584,15 @@ def process_posting_queue(
 
         if decision.tweet_type == "multi":
             histories = {a.indicator: build_move_history(conn, a) for a in decision.alerts}
+            primary = max(decision.alerts, key=lambda item: item.score)
+            scorecard = build_event_scorecard(
+                conn,
+                primary,
+                histories.get(primary.indicator),
+                peer_alerts=alerts,
+                cfg=cfg,
+            )
+            log_event_scorecard(scorecard)
             text = compose_multi_tweet(
                 decision.alerts,
                 decision.theme,
@@ -578,16 +600,26 @@ def process_posting_queue(
                 posting_cfg=posting_cfg,
                 is_emergency=decision.is_emergency,
                 app_cfg=cfg,
+                scorecard=scorecard,
             )
         else:
             alert = decision.alerts[0]
             history = build_move_history(conn, alert)
+            scorecard = build_event_scorecard(
+                conn,
+                alert,
+                history,
+                peer_alerts=alerts,
+                cfg=cfg,
+            )
+            log_event_scorecard(scorecard)
             text = compose_single_tweet(
                 alert,
                 history=history,
                 posting_cfg=posting_cfg,
                 is_emergency=decision.is_emergency,
                 app_cfg=cfg,
+                scorecard=scorecard,
             )
 
         chart_path = chart_for_decision(

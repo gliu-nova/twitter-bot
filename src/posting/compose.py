@@ -22,6 +22,7 @@ from src.posting.context_explain import (
     explain_context_enabled,
     log_context_decision,
 )
+from src.posting.event_score import EventScorecard, inject_scorecard
 from src.posting.history import MoveHistory
 from src.posting.models import AlertTrigger
 
@@ -1633,7 +1634,7 @@ def _major_for_headline(
     if _is_key_level_cross(alert):
         return standout
     return is_emergency or alert.alert_tier == "emergency" or (
-        standout and (alert.standalone_major or alert.score >= float(posting_cfg.get("high_single_threshold", 85)))
+        standout and (alert.standalone_major or alert.score >= float(posting_cfg.get("high_single_threshold", 75)))
     )
 
 
@@ -2192,6 +2193,7 @@ def compose_single_tweet(
     posting_cfg: dict[str, Any] | None = None,
     is_emergency: bool = False,
     app_cfg: dict[str, Any] | None = None,
+    scorecard: EventScorecard | None = None,
 ) -> str:
     global _ACTIVE_CONTEXT_DECISION
     history = history or MoveHistory()
@@ -2204,6 +2206,8 @@ def compose_single_tweet(
         text = _pick_single_template(alert, history, posting_cfg, is_emergency=is_emergency)
     finally:
         _ACTIVE_CONTEXT_DECISION = None
+    if scorecard is not None:
+        text = inject_scorecard(text, scorecard)
     if explain:
         log_context_decision(decision)
     return text
@@ -2270,6 +2274,7 @@ def compose_multi_tweet(
     posting_cfg: dict[str, Any] | None = None,
     is_emergency: bool = False,
     app_cfg: dict[str, Any] | None = None,
+    scorecard: EventScorecard | None = None,
 ) -> str:
     global _ACTIVE_CONTEXT_DECISION
     histories = histories or {}
@@ -2283,6 +2288,7 @@ def compose_multi_tweet(
             posting_cfg=posting_cfg,
             is_emergency=is_emergency,
             app_cfg=app_cfg,
+            scorecard=scorecard,
         )
 
     explain = explain_context_enabled(posting_cfg, app_cfg)
@@ -2347,6 +2353,8 @@ def compose_multi_tweet(
             )
     finally:
         _ACTIVE_CONTEXT_DECISION = None
+    if scorecard is not None:
+        text = inject_scorecard(text, scorecard)
     if explain:
         log_context_decision(decision)
     return text
