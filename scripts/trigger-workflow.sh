@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Trigger the Twitter Bot workflow via workflow_dispatch (bypasses sluggish GitHub cron).
+# Trigger the Cross-Asset-Signal-Engine workflow via workflow_dispatch (bypasses sluggish GitHub cron).
 # Used by external schedulers (cron-job.org) and for manual smoke tests.
 set -euo pipefail
 
-REPO="${GITHUB_REPOSITORY:-gliu-nova/twitter-bot}"
+REPO="${GITHUB_REPOSITORY:-gliu-nova/Cross-Asset-Signal-Engine}"
 WORKFLOW_ID="${WORKFLOW_ID:-299012131}"
 REF="${WORKFLOW_REF:-main}"
 SOURCE="${WORKFLOW_SOURCE:-external-cron}"

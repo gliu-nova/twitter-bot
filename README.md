@@ -1,4 +1,4 @@
-# Twitter Indicator Bot
+# Cross-Asset-Signal-Engine
 
 Monitors market and macro indicators, stores readings in SQLite, and posts to X/Twitter when **per-indicator rules** you define are triggered. A **posting engine** scores, groups, and rate-limits tweets (default cap: **8** regular posts/day; emergencies bypass the cap).
 
@@ -25,7 +25,7 @@ Each bot poll can ingest watched addresses through `market_memory.etherscan` and
 # 1. Install market-memory with the etherscan package (sibling checkout recommended)
 pip install -e ../market-memory
 
-# 2. Set API key in twitter-bot/.env
+# 2. Set API key in Cross-Asset-Signal-Engine/.env
 ETHERSCAN_API_KEY=your_key
 
 # 3. Edit watched addresses
@@ -130,7 +130,7 @@ data/outcome_ledger.html
 data/outcome_ledger.json
 ```
 
-The same summary is pushed to ops-hub and shown on the public Twitter bot dashboard (`/bots/twitter`). Regenerate without fetching:
+The same summary is pushed to ops-hub and shown on the public Cross-Asset-Signal-Engine dashboard (`/bots/twitter`). Regenerate without fetching:
 
 ```bash
 python run.py --outcome-ledger
@@ -169,7 +169,7 @@ Charts save to `data/charts/` and upload via Twitter media API. Under ~2MB for f
 ## Setup
 
 ```bash
-cd twitter-bot
+cd Cross-Asset-Signal-Engine
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -228,7 +228,7 @@ Do **not** commit `.env` to git.
 
 1. Go to **Actions** tab in your repo
 2. If prompted, click **Enable workflows**
-3. Select **Twitter Bot** workflow
+3. Select **Cross-Asset-Signal-Engine** workflow
 4. Click **Run workflow** once to test manually
 
 **Required:** set up external hourly dispatch — see [`scripts/EXTERNAL_CRON.md`](scripts/EXTERNAL_CRON.md) (cron-job.org → `workflow_dispatch` every hour at `:31` UTC).
@@ -257,7 +257,7 @@ GitHub Free private repos include **2,000 Actions minutes/month**. At 15-min int
 If you used launchd before, disable it so you don't double-post:
 
 ```bash
-launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot
+launchctl bootout gui/$(id -u)/com.georgeliu.cross-asset-signal-engine
 ```
 
 ## Data quality safeguards
@@ -296,7 +296,7 @@ For development only — use GitHub Actions for 24/7 production.
 
 ```bash
 ./scripts/install-schedule.sh
-launchctl bootout gui/$(id -u)/com.georgeliu.twitter-bot   # uninstall
+launchctl bootout gui/$(id -u)/com.georgeliu.cross-asset-signal-engine   # uninstall
 ```
 
 ## Run

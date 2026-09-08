@@ -1,4 +1,4 @@
-"""Bridge twitter-bot to market-memory Blockscout on-chain ingestion.
+"""Bridge Cross-Asset-Signal-Engine to market-memory Blockscout on-chain ingestion.
 
 Each bot poll can:
   1. Ingest watched addresses via market_memory.blockscout

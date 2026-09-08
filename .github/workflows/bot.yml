@@ -1,4 +1,4 @@
-name: Twitter Bot
+name: Cross-Asset-Signal-Engine
 
 on:
   # Hourly at :31 UTC via external cron → workflow_dispatch (scripts/EXTERNAL_CRON.md).
@@ -17,7 +17,7 @@ on:
 
 # Prevent overlapping runs if a fetch takes longer than one hour.
 concurrency:
-  group: twitter-bot
+  group: cross-asset-signal-engine
   cancel-in-progress: false
 
 jobs:

@@ -1,4 +1,4 @@
-"""Tests for market-memory Etherscan → twitter-bot whale bridge."""
+"""Tests for market-memory Etherscan → Cross-Asset-Signal-Engine whale bridge."""
 
 from __future__ import annotations
 

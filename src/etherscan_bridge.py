@@ -1,4 +1,4 @@
-"""Bridge twitter-bot to market-memory Etherscan on-chain ingestion.
+"""Bridge Cross-Asset-Signal-Engine to market-memory Etherscan on-chain ingestion.
 
 Each bot poll can:
   1. Ingest watched addresses via market_memory.etherscan

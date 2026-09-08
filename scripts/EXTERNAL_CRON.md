@@ -10,7 +10,7 @@ GitHub → **Settings → Developer settings → Fine-grained tokens → Generat
 
 | Field | Value |
 |-------|-------|
-| Repository access | Only `gliu-nova/twitter-bot` |
+| Repository access | Only `gliu-nova/Cross-Asset-Signal-Engine` |
 | Permissions | **Actions: Read and write** |
 
 Copy the token (shown once).
@@ -22,7 +22,7 @@ export GH_DISPATCH_TOKEN="github_pat_..."
 ./scripts/trigger-workflow.sh
 ```
 
-You should see `Dispatched gliu-nova/twitter-bot workflow 299012131`. Check the
+You should see `Dispatched gliu-nova/Cross-Asset-Signal-Engine workflow 299012131`. Check the
 **Actions** tab — a new run with `workflow_dispatch` should start within seconds.
 
 ## 3. Configure cron-job.org (free)
@@ -33,8 +33,8 @@ You should see `Dispatched gliu-nova/twitter-bot workflow 299012131`. Check the
 
 | Field | Value |
 |-------|-------|
-| Title | Twitter Bot hourly |
-| URL | `https://api.github.com/repos/gliu-nova/twitter-bot/actions/workflows/299012131/dispatches` |
+| Title | Cross-Asset-Signal-Engine hourly |
+| URL | `https://api.github.com/repos/gliu-nova/Cross-Asset-Signal-Engine/actions/workflows/299012131/dispatches` |
 | Schedule | Every hour at **:31 UTC** (9:31 AM ET ≈ market open during EDT) |
 | Request method | **POST** |
 | Request body | `{"ref":"main","inputs":{"source":"external-cron"}}` |

@@ -1,4 +1,4 @@
-"""Bridge twitter-bot alerts to the local market-memory DuckDB store."""
+"""Bridge Cross-Asset-Signal-Engine alerts to the local market-memory DuckDB store."""
 
 from __future__ import annotations
 
@@ -296,7 +296,7 @@ def record_posted_alert(alert: Any, cfg: dict[str, Any]) -> None:
         value=float(alert.value),
         percent_change=pct,
         direction=direction,
-        source="twitter-bot",
+        source="cross-asset-signal-engine",
         tags=_event_tags(alert.indicator, mapping),
         metadata=metadata,
     )

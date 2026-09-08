@@ -1,4 +1,4 @@
-"""Tests for market-memory Blockscout → twitter-bot bridge."""
+"""Tests for market-memory Blockscout → Cross-Asset-Signal-Engine bridge."""
 
 from __future__ import annotations
 

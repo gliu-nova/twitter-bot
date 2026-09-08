@@ -64,7 +64,7 @@ def push_ops_heartbeat(
         details["outcome_ledger"] = outcome_ledger
 
     payload = {
-        "service_id": "twitter-bot",
+        "service_id": "cross-asset-signal-engine",
         "status": status,
         "reported_at": datetime.now(timezone.utc).isoformat(),
         "summary": (
@@ -75,7 +75,7 @@ def push_ops_heartbeat(
         ),
         "details": details,
         "links": {
-            "actions": "https://github.com/gliu-nova/twitter-bot/actions",
+            "actions": "https://github.com/gliu-nova/Cross-Asset-Signal-Engine/actions",
         },
     }
 
